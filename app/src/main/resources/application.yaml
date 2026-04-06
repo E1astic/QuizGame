@@ -1,0 +1,20 @@
+server:
+  port: 8040
+  servlet:
+    context-path: /quizgame
+spring:
+  application:
+    name: quiz-game
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+  datasource:
+    url: jdbc:postgresql://localhost:5433/quizgame
+    driver-class-name: org.postgresql.Driver
+    username: postgres
+    password: postgres
+
+auth:
+  jwt:
+    secret: T,Rn[}@24!SVn]3F)i<D]IJT;6:t}rTz$6i3&p41B=M
+    lifetime: 1h
