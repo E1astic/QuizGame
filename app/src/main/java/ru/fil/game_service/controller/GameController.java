@@ -46,16 +46,27 @@ public class GameController {
     @MessageMapping("/game/start")
     public ResponseEntity<GameStartResponse> startGame(@Payload UUID gameId) {
         try {
+            log.info("🚀 Запуск игры: {}", gameId);
             gameSessionService.startGame(gameId);
             List<QuestionAnswerDto> questions = gameSessionService.getQuestionsForGame(gameId);
             
+            log.info("📤 Отправка сообщения о старте игры в /topic/game/{}/started", gameId);
             messagingTemplate.convertAndSend("/topic/game/" + gameId + "/started", 
                 new GameStartResponse(gameId, true, "Игра началась"));
             
+            log.info("📤 Отправка {} вопросов в /topic/game/{}/questions", questions != null ? questions.size() : 0, gameId);
             messagingTemplate.convertAndSend("/topic/game/" + gameId + "/questions", questions);
+            
+            // Send initial question transition to show first question
+            QuestionTransitionDto firstTransition = gameSessionService.createQuestionTransition(gameId, null);
+            if (firstTransition != null) {
+                log.info("📤 Отправка первого вопроса в /topic/game/{}/transition", gameId);
+                messagingTemplate.convertAndSend("/topic/game/" + gameId + "/transition", firstTransition);
+            }
             
             return ResponseEntity.ok(new GameStartResponse(gameId, true, "Игра успешно началась"));
         } catch (IllegalStateException e) {
+            log.error("❌ Ошибка при запуске игры: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new GameStartResponse(gameId, false, e.getMessage()));
         }
@@ -63,6 +74,9 @@ public class GameController {
 
     @MessageMapping("/game/answer")
     public ResponseEntity<GameAnswerResponse> submitAnswer(@Payload GameAnswerRequest request) {
+        log.info("📥 Контроллер: Получен ответ от команды {} на вопрос {} в игре {}", 
+                request.teamId(), request.questionId(), request.gameId());
+        
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
         
         // Send answer response only to the team that answered (using queue)
@@ -71,9 +85,11 @@ public class GameController {
             "/queue/answer", 
             response
         );
+        log.info("📤 Контроллер: Отправлен ответ команде в /queue/answer");
         
         // If the answer was correct, broadcast the question transition to all teams
         if (response.correct()) {
+            log.info("✅ Контроллер: Ответ правильный, отправляем переход к вопросу всем");
             QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
                 request.gameId(), 
                 request.teamId()
@@ -83,6 +99,7 @@ public class GameController {
                     ? "Команда \"" + transition.correctTeamName() + "\" ответила правильно! Переходим к вопросу " + transition.questionNumber() 
                     : "Переходим к вопросу " + transition.questionNumber();
                 
+                log.info("📢 Контроллер: Отправка сообщения о переходе: {}", message);
                 messagingTemplate.convertAndSend(
                     "/topic/game/" + request.gameId() + "/transition",
                     transition
@@ -90,16 +107,20 @@ public class GameController {
             }
         } else {
             // Check if all teams have answered - if so, broadcast transition without correct team
+            log.info("❌ Контроллер: Ответ неправильный, проверяем переход");
             QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
                 request.gameId(), 
                 null
             );
             if (transition != null && transition.questionNumber() != null) {
                 // This means we're moving to next question because all teams answered incorrectly
+                log.info("📢 Контроллер: Все команды ответили, отправляем переход без правильной команды");
                 messagingTemplate.convertAndSend(
                     "/topic/game/" + request.gameId() + "/transition",
                     transition
                 );
+            } else {
+                log.info("ℹ️ Контроллер: Переход не требуется (еще не все ответили или игра закончена)");
             }
         }
         
