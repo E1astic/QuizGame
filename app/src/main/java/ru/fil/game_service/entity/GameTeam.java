@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -15,6 +16,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @Getter
 @Builder
+@Setter
 public class GameTeam {
 
     @EmbeddedId
