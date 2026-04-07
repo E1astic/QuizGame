@@ -10,6 +10,9 @@ import ru.fil.app.game.dto.QuestionMessage;
 import ru.fil.app.game.entity.GameStatus;
 import ru.fil.app.game.entity.QuizGame;
 import ru.fil.app.game.entity.QuizGameTeam;
+import ru.fil.app.game.entity.QuizGameTeamId;
+import ru.fil.game_social.entity.Team;
+import ru.fil.game_social.repository.TeamRepository;
 import ru.fil.app.game.repository.QuizGameRepository;
 import ru.fil.content_service.entity.Answer;
 import ru.fil.content_service.entity.Question;
@@ -31,6 +34,7 @@ public class QuizGameService {
     private final QuizGameRepository quizGameRepository;
     private final QuizRepository quizRepository;
     private final QuestionRepository questionRepository;
+    private final TeamRepository teamRepository;
     private final SimpMessageSendingOperations messagingTemplate;
 
     // In-memory хранилище для активных игр
@@ -47,16 +51,21 @@ public class QuizGameService {
 
         // Проверяем, не зарегистрирована ли уже команда
         boolean alreadyRegistered = game.getGameTeams().stream()
-                .anyMatch(gt -> gt.getTeam().getId().equals(teamId));
+                .anyMatch(gt -> gt.getQuizGameTeamId().getTeamId().equals(teamId));
 
         if (alreadyRegistered) {
             throw new RuntimeException("Команда уже зарегистрирована в этой игре.");
         }
 
         // Создаем связь команды с игрой
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new RuntimeException("Команда не найдена: " + teamId));
+        
+        QuizGameTeamId gameIdPair = new QuizGameTeamId(gameId, teamId);
         QuizGameTeam gameTeam = QuizGameTeam.builder()
                 .game(game)
-                .teamId(new ru.fil.app.game.entity.QuizGameTeamId(gameId, teamId))
+                .team(team)
+                .quizGameTeamId(gameIdPair)
                 .score(0)
                 .build();
 
@@ -96,7 +105,7 @@ public class QuizGameService {
 
         // Инициализируем счетчики команд
         for (QuizGameTeam gameTeam : game.getGameTeams()) {
-            session.getTeamScores().put(gameTeam.getTeam().getId(), 0);
+            session.getTeamScores().put(gameTeam.getQuizGameTeamId().getTeamId(), 0);
         }
 
         activeGames.put(gameId, session);
