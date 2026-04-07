@@ -31,6 +31,8 @@ public interface GameRepository extends JpaRepository<Game, UUID> {
             "LEFT JOIN FETCH gt.team t " +
             "LEFT JOIN FETCH t.players pt " +
             "LEFT JOIN FETCH pt.player p " +
+            "LEFT JOIN FETCH g.quiz q " +
+            "LEFT JOIN FETCH q.questions qtq " +
             "WHERE g.id = :gameId")
     Optional<Game> findByIdWithTeamsAndPlayers(@Param("gameId") UUID gameId);
 }

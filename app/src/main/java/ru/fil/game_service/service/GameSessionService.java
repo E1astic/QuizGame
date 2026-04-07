@@ -23,6 +23,7 @@ import ru.fil.game_service.entity.GameStatus;
 import ru.fil.game_service.entity.GameTeam;
 import ru.fil.game_service.repository.GameTeamRepository;
 
+import jakarta.persistence.EntityManager;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,6 +39,7 @@ public class GameSessionService {
     private final SimpMessagingTemplate messagingTemplate;
     private final TeamRepository teamRepository;
     private final PlayerRepository playerRepository;
+    private final EntityManager entityManager;
 
     private final Map<UUID, List<QuestionAnswerDto>> gameQuestionsCache = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, String>> correctAnswersCache = new ConcurrentHashMap<>();
@@ -311,6 +313,9 @@ public class GameSessionService {
         game.setStatus(GameStatus.FINISHED);
         game.setFinishedAt(java.time.OffsetDateTime.now());
         gameService.saveGame(game);
+        
+        // Flush to ensure all stats are saved before clearing session
+        entityManager.flush();
         
         log.info("🏆 Игра завершена! Победитель: {}", winningTeamId != null ? winningTeamId : "Нет победителя");
         
