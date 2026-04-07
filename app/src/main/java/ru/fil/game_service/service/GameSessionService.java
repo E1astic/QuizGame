@@ -28,6 +28,7 @@ public class GameSessionService {
     private final Map<UUID, List<QuestionAnswerDto>> gameQuestionsCache = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, String>> correctAnswersCache = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, UUID>> teamAnswersCache = new ConcurrentHashMap<>(); // gameId -> (teamId -> answerId)
+    private final Map<UUID, Set<UUID>> answeredQuestionsCache = new ConcurrentHashMap<>(); // gameId -> set of answered questionIds
 
     public void loadGameQuestions(UUID gameId) {
         Optional<Game> gameOptional = gameService.getGameById(gameId);
@@ -41,6 +42,8 @@ public class GameSessionService {
         List<QuestionAnswerDto> questionsForClient = new ArrayList<>();
         Map<UUID, String> correctAnswersMap = new HashMap<>();
 
+        int totalQuestions = quiz.getQuestions().size();
+        int index = 0;
         for (QuizToQuestion quizToQuestion : quiz.getQuestions()) {
             Question question = quizToQuestion.getQuestion();
             
@@ -62,17 +65,42 @@ public class GameSessionService {
             QuestionAnswerDto questionDto = new QuestionAnswerDto(
                     question.getId(),
                     question.getName(),
-                    answerOptions
+                    answerOptions,
+                    index + 1,
+                    totalQuestions
             );
             questionsForClient.add(questionDto);
+            index++;
         }
 
         gameQuestionsCache.put(gameId, questionsForClient);
         correctAnswersCache.put(gameId, correctAnswersMap);
+        answeredQuestionsCache.put(gameId, ConcurrentHashMap.newKeySet());
+        
+        // Initialize current question index
+        game.setCurrentQuestionIndex(0);
+        gameService.saveGame(game);
     }
 
     public List<QuestionAnswerDto> getQuestionsForGame(UUID gameId) {
         return gameQuestionsCache.get(gameId);
+    }
+
+    public QuestionAnswerDto getCurrentQuestion(UUID gameId) {
+        List<QuestionAnswerDto> questions = gameQuestionsCache.get(gameId);
+        if (questions == null || questions.isEmpty()) {
+            return null;
+        }
+        
+        Game game = gameService.getGameById(gameId)
+                .orElseThrow(() -> new IllegalStateException("Игра не найдена"));
+        
+        Integer currentIndex = game.getCurrentQuestionIndex();
+        if (currentIndex == null || currentIndex >= questions.size()) {
+            return null;
+        }
+        
+        return questions.get(currentIndex);
     }
 
     public boolean validateAnswer(UUID gameId, UUID questionId, UUID answerId) {
@@ -89,6 +117,7 @@ public class GameSessionService {
         gameQuestionsCache.remove(gameId);
         correctAnswersCache.remove(gameId);
         teamAnswersCache.remove(gameId);
+        answeredQuestionsCache.remove(gameId);
     }
 
     public void startGame(UUID gameId) {
@@ -117,28 +146,36 @@ public class GameSessionService {
     public GameAnswerResponse submitAnswer(GameAnswerRequest request) {
         Optional<Game> gameOptional = gameService.getGameById(request.gameId());
         if (gameOptional.isEmpty()) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не найдена");
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не найдена", null);
         }
 
         Game game = gameOptional.get();
         if (game.getStatus() != GameStatus.IN_PROGRESS) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не активна");
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не активна", null);
         }
 
         Optional<GameTeam> gameTeamOptional = gameTeamRepository.findByGameIdAndTeamId(request.gameId(), request.teamId());
         if (gameTeamOptional.isEmpty()) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда не участвует в игре");
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда не участвует в игре", null);
         }
 
+        // Check if this question was already answered by this team
         Map<UUID, UUID> teamAnswers = teamAnswersCache.computeIfAbsent(request.gameId(), k -> new ConcurrentHashMap<>());
         
         if (teamAnswers.containsKey(request.teamId())) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос");
+            UUID lastAnsweredQuestionId = teamAnswers.get(request.teamId());
+            if (lastAnsweredQuestionId != null && lastAnsweredQuestionId.equals(request.questionId())) {
+                return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос", null);
+            }
         }
 
         boolean isCorrect = validateAnswer(request.gameId(), request.questionId(), request.answerId());
         
-        teamAnswers.put(request.teamId(), request.answerId());
+        teamAnswers.put(request.teamId(), request.questionId());
+        
+        // Mark question as answered for this game
+        Set<UUID> answeredQuestions = answeredQuestionsCache.computeIfAbsent(request.gameId(), k -> ConcurrentHashMap.newKeySet());
+        answeredQuestions.add(request.questionId());
 
         if (isCorrect) {
             GameTeam gameTeam = gameTeamOptional.get();
@@ -159,12 +196,36 @@ public class GameSessionService {
             }
         }
 
+        // Move to next question if answer is correct
+        QuestionAnswerDto nextQuestion = null;
+        if (isCorrect) {
+            Integer currentIndex = game.getCurrentQuestionIndex();
+            if (currentIndex == null) {
+                currentIndex = 0;
+            }
+            Integer nextIndex = currentIndex + 1;
+            
+            List<QuestionAnswerDto> questions = gameQuestionsCache.get(request.gameId());
+            if (questions != null && nextIndex < questions.size()) {
+                game.setCurrentQuestionIndex(nextIndex);
+                gameService.saveGame(game);
+                nextQuestion = questions.get(nextIndex);
+            } else {
+                // All questions answered - finish game
+                finishGame(request.gameId());
+            }
+        } else {
+            // Return current question again if answer was wrong
+            nextQuestion = getCurrentQuestion(request.gameId());
+        }
+
         return new GameAnswerResponse(
                 request.gameId(), 
                 request.questionId(), 
                 request.teamId(), 
                 isCorrect, 
-                isCorrect ? "Правильный ответ" : "Неправильный ответ"
+                isCorrect ? "Правильный ответ" : "Неправильный ответ",
+                nextQuestion
         );
     }
 }

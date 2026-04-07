@@ -42,6 +42,9 @@ public class Game {
     @Column(name = "finished_at", nullable = true)
     private OffsetDateTime finishedAt;
 
+    @Column(name = "current_question_index", nullable = true)
+    private Integer currentQuestionIndex;
+
     @OneToMany(mappedBy = "game", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<GameTeam> gameTeams = new HashSet<>();
 

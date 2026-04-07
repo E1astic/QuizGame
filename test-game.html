@@ -10,10 +10,89 @@
         .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
         button { margin: 5px; padding: 10px 20px; cursor: pointer; }
         input, select { margin: 5px; padding: 8px; }
-        #log { background: #f4f4f4; padding: 10px; height: 400px; overflow-y: scroll; font-family: monospace; }
+        #log { background: #f4f4f4; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
         .success { color: green; }
         .error { color: red; }
         .info { color: blue; }
+        
+        /* Question Display Styles */
+        #questionDisplay { 
+            background: #e8f4f8; 
+            padding: 20px; 
+            margin: 20px 0; 
+            border-radius: 8px;
+            border: 2px solid #007bff;
+        }
+        #questionText { 
+            font-size: 1.3em; 
+            font-weight: bold; 
+            margin-bottom: 15px;
+            color: #333;
+        }
+        #questionProgress {
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .answerOption {
+            display: block;
+            width: 100%;
+            padding: 12px 15px;
+            margin: 8px 0;
+            background: white;
+            border: 2px solid #007bff;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 1em;
+            transition: all 0.3s;
+        }
+        .answerOption:hover {
+            background: #007bff;
+            color: white;
+        }
+        .answerOption.selected {
+            background: #007bff;
+            color: white;
+        }
+        .answerOption.correct {
+            background: #28a745;
+            border-color: #28a745;
+            color: white;
+        }
+        .answerOption.wrong {
+            background: #dc3545;
+            border-color: #dc3545;
+            color: white;
+        }
+        .answerOption:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        #submitAnswerBtn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1em;
+            margin-top: 15px;
+        }
+        #submitAnswerBtn:disabled {
+            background: #ccc;
+        }
+        #answerResult {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+        #answerResult.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        #answerResult.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
     </style>
 </head>
 <body>
@@ -46,11 +125,16 @@
     <button onclick="finishGame()">Завершить игру</button>
 </div>
 
-<div class="section">
-    <h2>5. Отправка ответа</h2>
-    <input type="text" id="questionId" placeholder="Question ID (UUID)">
-    <input type="text" id="answerId" placeholder="Answer ID (UUID)">
-    <button onclick="submitAnswer()">Отправить ответ</button>
+<!-- Question Display Section -->
+<div class="section" id="questionSection" style="display: none;">
+    <h2>📝 Текущий вопрос</h2>
+    <div id="questionDisplay">
+        <div id="questionProgress">Вопрос <span id="currentQuestionNum">-</span> из <span id="totalQuestions">-</span></div>
+        <div id="questionText">Загрузка вопроса...</div>
+        <div id="answersContainer"></div>
+        <button id="submitAnswerBtn" onclick="submitSelectedAnswer()" disabled>Ответить</button>
+        <div id="answerResult" style="display: none;"></div>
+    </div>
 </div>
 
 <div class="section">
@@ -63,6 +147,9 @@
     let stompClient = null;
     let currentGameId = null;
     let questionsSubscription = null;
+    let currentQuestion = null;
+    let selectedAnswerId = null;
+    let isAnswering = false;
 
     function log(message, type = 'info') {
         const logDiv = document.getElementById('log');
@@ -159,11 +246,13 @@
 
                 switch(name) {
                     case 'questions':
-                        handleQuestions(message); // ← Ваша функция с парсингом
+                        handleQuestions(message);
+                        break;
+                    case 'answer':
+                        handleAnswerResponse(message);
                         break;
                     case 'teams':
                     case 'started':
-                    case 'answer':
                     case 'finished':
                         log(`📨 ${name}: ${message.body}`, 'info');
                         break;
@@ -283,14 +372,8 @@
             log(`✅ Получено вопросов: ${Array.isArray(questions) ? questions.length : 'не массив'}`, 'success');
 
             if (Array.isArray(questions) && questions.length > 0) {
-                const first = questions[0];
-                // Универсально достаём ID (под разные DTO)
-                document.getElementById('questionId').value = first.id || first.questionId || '';
-
-                if (first.answers && Array.isArray(first.answers) && first.answers.length > 0) {
-                    document.getElementById('answerId').value = first.answers[0].id || first.answers[0].answerId || '';
-                    log('📝 Первый вопрос и ответ автозаполнены', 'info');
-                }
+                // Show first question
+                displayQuestion(questions[0]);
             }
         } catch (e) {
             console.error('❌ JSON Parse Error:', e);
@@ -300,21 +383,151 @@
         }
     }
 
-    function submitAnswer() {
-        const gameId = document.getElementById('gameId').value;
-        const questionId = document.getElementById('questionId').value;
-        const answerId = document.getElementById('answerId').value;
-        const teamId = document.getElementById('teamId').value;
+    function handleAnswerResponse(message) {
+        try {
+            const response = JSON.parse(message.body);
+            console.log('📩 Answer response:', response);
 
-        if (!gameId || !questionId || !answerId || !teamId) {
-            log('Заполните все поля для ответа', 'error');
+            const resultDiv = document.getElementById('answerResult');
+            
+            if (response.correct) {
+                log(`✅ ${response.message}`, 'success');
+                resultDiv.className = 'success';
+                resultDiv.innerText = response.message;
+                resultDiv.style.display = 'block';
+                
+                // Highlight correct answer
+                const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
+                if (selectedBtn) {
+                    selectedBtn.classList.add('correct');
+                }
+                
+                // Check if there's a next question
+                if (response.currentQuestion) {
+                    log('📝 Переход к следующему вопросу', 'info');
+                    setTimeout(() => {
+                        displayQuestion(response.currentQuestion);
+                    }, 1500);
+                } else {
+                    log('🏆 Игра завершена!', 'success');
+                    resultDiv.innerText = response.message + ' Игра завершена!';
+                }
+            } else {
+                log(`❌ ${response.message}`, 'error');
+                resultDiv.className = 'error';
+                resultDiv.innerText = response.message;
+                resultDiv.style.display = 'block';
+                
+                // Highlight wrong answer
+                const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
+                if (selectedBtn) {
+                    selectedBtn.classList.add('wrong');
+                }
+                
+                // Keep showing current question for retry
+                isAnswering = false;
+                enableAnswerButtons();
+            }
+        } catch (e) {
+            console.error('❌ Parse error:', e);
+            log('💥 Ошибка парсинга ответа: ' + e.message, 'error');
+        }
+    }
+
+    function displayQuestion(question) {
+        currentQuestion = question;
+        selectedAnswerId = null;
+        isAnswering = false;
+        
+        // Hide result from previous answer
+        document.getElementById('answerResult').style.display = 'none';
+        
+        // Update progress
+        document.getElementById('currentQuestionNum').innerText = question.questionNumber || '?';
+        document.getElementById('totalQuestions').innerText = question.totalQuestions || '?';
+        
+        // Update question text
+        document.getElementById('questionText').innerText = question.questionText;
+        
+        // Create answer buttons
+        const answersContainer = document.getElementById('answersContainer');
+        answersContainer.innerHTML = '';
+        
+        if (question.answers && Array.isArray(question.answers)) {
+            question.answers.forEach(answer => {
+                const btn = document.createElement('button');
+                btn.className = 'answerOption';
+                btn.innerText = answer.answerText;
+                btn.dataset.answerId = answer.answerId;
+                btn.onclick = () => selectAnswer(answer.answerId, btn);
+                answersContainer.appendChild(btn);
+            });
+        }
+        
+        // Show question section
+        document.getElementById('questionSection').style.display = 'block';
+        
+        // Disable submit button until answer is selected
+        document.getElementById('submitAnswerBtn').disabled = true;
+        
+        log(`📝 Вопрос ${question.questionNumber}/${question.totalQuestions}: ${question.questionText}`, 'info');
+    }
+
+    function selectAnswer(answerId, btnElement) {
+        if (isAnswering) return;
+        
+        selectedAnswerId = answerId;
+        
+        // Remove selected class from all buttons
+        document.querySelectorAll('.answerOption').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        
+        // Add selected class to clicked button
+        btnElement.classList.add('selected');
+        
+        // Enable submit button
+        document.getElementById('submitAnswerBtn').disabled = false;
+    }
+
+    function enableAnswerButtons() {
+        document.querySelectorAll('.answerOption').forEach(btn => {
+            btn.disabled = false;
+        });
+        document.getElementById('submitAnswerBtn').disabled = false;
+    }
+
+    function submitSelectedAnswer() {
+        if (!selectedAnswerId || !currentQuestion) {
+            log('❌ Выберите вариант ответа', 'error');
             return;
         }
-
+        
+        if (isAnswering) {
+            log('⏳ Ответ уже отправляется...', 'warning');
+            return;
+        }
+        
+        const gameId = document.getElementById('gameId').value;
+        const teamId = document.getElementById('teamId').value;
+        
+        if (!gameId || !teamId) {
+            log('❌ Game ID или Team ID не указан', 'error');
+            return;
+        }
+        
+        isAnswering = true;
+        
+        // Disable all answer buttons
+        document.querySelectorAll('.answerOption').forEach(btn => {
+            btn.disabled = true;
+        });
+        document.getElementById('submitAnswerBtn').disabled = true;
+        
         send('/app/game/answer', {
             gameId: gameId,
-            questionId: questionId,
-            answerId: answerId,
+            questionId: currentQuestion.questionId,
+            answerId: selectedAnswerId,
             teamId: teamId
         });
     }
