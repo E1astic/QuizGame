@@ -65,7 +65,14 @@ public class GameController {
     public ResponseEntity<GameAnswerResponse> submitAnswer(@Payload GameAnswerRequest request) {
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
         
-        messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer", response);
+        // Отправляем сообщение о правильном ответе всем участникам
+        if (response.resultType() == GameSessionService.AnswerResultType.CORRECT) {
+            messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer", response);
+        } 
+        // Отправляем сообщения о неправильном ответе или уже отвеченном вопросе только команде, которая инициировала действие
+        else {
+            messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/team/" + request.teamId(), response);
+        }
         
         return ResponseEntity.ok(response);
     }

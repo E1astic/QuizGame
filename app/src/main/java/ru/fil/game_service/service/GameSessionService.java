@@ -138,21 +138,27 @@ public class GameSessionService {
         clearGameSession(gameId);
     }
 
+    public enum AnswerResultType {
+        CORRECT,
+        INCORRECT,
+        ALREADY_ANSWERED
+    }
+
     @Transactional
     public GameAnswerResponse submitAnswer(GameAnswerRequest request) {
         Optional<Game> gameOptional = gameService.getGameById(request.gameId());
         if (gameOptional.isEmpty()) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не найдена", null);
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не найдена", null, AnswerResultType.INCORRECT);
         }
 
         Game game = gameOptional.get();
         if (game.getStatus() != GameStatus.IN_PROGRESS) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не активна", null);
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не активна", null, AnswerResultType.INCORRECT);
         }
 
         Optional<GameTeam> gameTeamOptional = gameTeamRepository.findByGameIdAndTeamId(request.gameId(), request.teamId());
         if (gameTeamOptional.isEmpty()) {
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда не участвует в игре", null);
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда не участвует в игре", null, AnswerResultType.INCORRECT);
         }
 
         // Check if this question was already answered by this team
@@ -161,7 +167,7 @@ public class GameSessionService {
         if (teamAnswers.containsKey(request.teamId())) {
             UUID lastAnsweredQuestionId = teamAnswers.get(request.teamId());
             if (lastAnsweredQuestionId != null && lastAnsweredQuestionId.equals(request.questionId())) {
-                return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос", null);
+                return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос", null, AnswerResultType.ALREADY_ANSWERED);
             }
         }
 
@@ -216,13 +222,15 @@ public class GameSessionService {
             nextQuestion = getCurrentQuestion(request.gameId());
         }
 
+        AnswerResultType resultType = isCorrect ? AnswerResultType.CORRECT : AnswerResultType.INCORRECT;
         GameAnswerResponse response = new GameAnswerResponse(
                 request.gameId(), 
                 request.questionId(), 
                 request.teamId(), 
                 isCorrect, 
                 isCorrect ? "Правильный ответ" : "Неправильный ответ",
-                nextQuestion
+                nextQuestion,
+                resultType
         );
         
         if (shouldFinishGame) {

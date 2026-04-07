@@ -1,6 +1,8 @@
 package ru.fil.game_service.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import ru.fil.game_service.service.GameSessionService.AnswerResultType;
+
 import java.util.UUID;
 
 public record GameAnswerResponse(
@@ -9,6 +11,7 @@ public record GameAnswerResponse(
         UUID teamId,
         boolean correct,
         String message,
-        @JsonProperty("currentQuestion") QuestionAnswerDto currentQuestion
+        @JsonProperty("currentQuestion") QuestionAnswerDto currentQuestion,
+        AnswerResultType resultType
 ) {
 }

@@ -1,39 +1,64 @@
 ```
-# Compiled and build artifacts
+# Java/Maven specific ignores
 *.class
-*.o
-*.obj
-*.out
-build/
+*.jar
+*.war
+*.ear
+*.jnilib
+*.so
+*.dll
+*.dylib
+
+# Build directories
 target/
+build/
 
-# Dependencies
-.gradle/
-lib/
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
+# IDE specific
 .idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*~
 
 # Environment
 .env
 .env.local
-*.env.*
+.env.*
 
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
+# Dependencies
+lib/
+libs/
+dependency-reduced-pom.xml
 
-# Python cache
+# Package manager
+node_modules/
+
+# Python related (if any mixed projects)
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+env/
+venv/
+.venv/
+
+# Gradle
+.gradle/
+build/
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+dependency-reduced-pom.xml
 ```
