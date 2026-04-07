@@ -65,7 +65,43 @@ public class GameController {
     public ResponseEntity<GameAnswerResponse> submitAnswer(@Payload GameAnswerRequest request) {
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
         
-        messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer", response);
+        // Send answer response only to the team that answered (using queue)
+        messagingTemplate.convertAndSendToUser(
+            request.teamId().toString(), 
+            "/queue/answer", 
+            response
+        );
+        
+        // If the answer was correct, broadcast the question transition to all teams
+        if (response.correct()) {
+            QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
+                request.gameId(), 
+                request.teamId()
+            );
+            if (transition != null) {
+                String message = transition.correctTeamName() != null 
+                    ? "Команда \"" + transition.correctTeamName() + "\" ответила правильно! Переходим к вопросу " + transition.questionNumber() 
+                    : "Переходим к вопросу " + transition.questionNumber();
+                
+                messagingTemplate.convertAndSend(
+                    "/topic/game/" + request.gameId() + "/transition",
+                    transition
+                );
+            }
+        } else {
+            // Check if all teams have answered - if so, broadcast transition without correct team
+            QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
+                request.gameId(), 
+                null
+            );
+            if (transition != null && transition.questionNumber() != null) {
+                // This means we're moving to next question because all teams answered incorrectly
+                messagingTemplate.convertAndSend(
+                    "/topic/game/" + request.gameId() + "/transition",
+                    transition
+                );
+            }
+        }
         
         return ResponseEntity.ok(response);
     }

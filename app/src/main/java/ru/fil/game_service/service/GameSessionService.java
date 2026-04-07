@@ -10,13 +10,18 @@ import ru.fil.content_service.entity.QuizToQuestion;
 import ru.fil.game_service.dto.GameAnswerRequest;
 import ru.fil.game_service.dto.GameAnswerResponse;
 import ru.fil.game_service.dto.QuestionAnswerDto;
+import ru.fil.game_service.dto.QuestionTransitionDto;
 import ru.fil.game_service.entity.Game;
 import ru.fil.game_service.entity.GameStatus;
 import ru.fil.game_service.entity.GameTeam;
 import ru.fil.game_service.repository.GameTeamRepository;
 
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +35,18 @@ public class GameSessionService {
     private final Map<UUID, Map<UUID, UUID>> teamAnswersCache = new ConcurrentHashMap<>(); // gameId -> (teamId -> answerId)
     private final Map<UUID, Set<UUID>> answeredQuestionsCache = new ConcurrentHashMap<>(); // gameId -> set of answered questionIds
     private final Map<UUID, Integer> currentQuestionIndexCache = new ConcurrentHashMap<>(); // gameId -> current question index
+    private final Map<UUID, Set<UUID>> teamsAnsweredForCurrentQuestion = new ConcurrentHashMap<>(); // gameId -> set of teamIds that answered current question
+    private final Map<UUID, OffsetDateTime> questionStartTimeCache = new ConcurrentHashMap<>(); // gameId -> when current question started
+    
+    private static final int QUESTION_TIME_LIMIT_SECONDS = 30;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(5);
+    
+    // Callback for sending transition messages - will be set by controller
+    private Runnable questionTransitionCallback;
+    
+    public void setQuestionTransitionCallback(Runnable callback) {
+        this.questionTransitionCallback = callback;
+    }
 
     public void loadGameQuestions(UUID gameId) {
         Optional<Game> gameOptional = gameService.getGameById(gameId);
@@ -114,6 +131,8 @@ public class GameSessionService {
         teamAnswersCache.remove(gameId);
         answeredQuestionsCache.remove(gameId);
         currentQuestionIndexCache.remove(gameId);
+        teamsAnsweredForCurrentQuestion.remove(gameId);
+        questionStartTimeCache.remove(gameId);
     }
 
     public void startGame(UUID gameId) {
@@ -125,6 +144,91 @@ public class GameSessionService {
         game.setStatus(GameStatus.IN_PROGRESS);
         game.setStartedAt(java.time.OffsetDateTime.now());
         gameService.saveGame(game);
+        
+        // Start timer for the first question
+        startQuestionTimer(gameId);
+    }
+    
+    private void startQuestionTimer(UUID gameId) {
+        questionStartTimeCache.put(gameId, OffsetDateTime.now());
+        
+        scheduler.schedule(() -> {
+            try {
+                QuestionAnswerDto currentQuestion = getCurrentQuestion(gameId);
+                if (currentQuestion != null) {
+                    // Time's up - move to next question
+                    moveToNextQuestion(gameId, null);
+                }
+            } catch (Exception e) {
+                // Ignore errors in scheduled task
+            }
+        }, QUESTION_TIME_LIMIT_SECONDS, TimeUnit.SECONDS);
+    }
+    
+    private void moveToNextQuestion(UUID gameId, UUID correctTeamId) {
+        Integer currentIndex = currentQuestionIndexCache.get(gameId);
+        if (currentIndex == null) {
+            currentIndex = 0;
+        }
+        Integer nextIndex = currentIndex + 1;
+        
+        List<QuestionAnswerDto> questions = gameQuestionsCache.get(gameId);
+        QuestionAnswerDto nextQuestion = null;
+        boolean shouldFinishGame = false;
+        
+        if (questions != null && nextIndex < questions.size()) {
+            currentQuestionIndexCache.put(gameId, nextIndex);
+            nextQuestion = questions.get(nextIndex);
+            // Clear teams that answered for the new question
+            teamsAnsweredForCurrentQuestion.computeIfAbsent(gameId, k -> ConcurrentHashMap.newKeySet());
+            // Start timer for the new question
+            startQuestionTimer(gameId);
+        } else {
+            // All questions answered - finish game
+            shouldFinishGame = true;
+        }
+        
+        // Clear answered teams for this question
+        Set<UUID> answeredTeams = teamsAnsweredForCurrentQuestion.computeIfAbsent(gameId, k -> ConcurrentHashMap.newKeySet());
+        answeredTeams.clear();
+        
+        if (shouldFinishGame) {
+            finishGame(gameId);
+        }
+        
+        // Notify about question transition (this will be handled by controller via callback)
+        if (questionTransitionCallback != null) {
+            questionTransitionCallback.run();
+        }
+    }
+    
+    public QuestionTransitionDto createQuestionTransition(UUID gameId, UUID correctTeamId) {
+        QuestionAnswerDto currentQuestion = getCurrentQuestion(gameId);
+        if (currentQuestion == null) {
+            return null;
+        }
+        
+        String correctTeamName = null;
+        if (correctTeamId != null) {
+            Optional<Game> gameOptional = gameService.getGameById(gameId);
+            if (gameOptional.isPresent()) {
+                for (GameTeam gameTeam : gameOptional.get().getGameTeams()) {
+                    if (gameTeam.getGameTeamId().getTeamId().equals(correctTeamId)) {
+                        correctTeamName = gameTeam.getTeam().getName();
+                        break;
+                    }
+                }
+            }
+        }
+        
+        return new QuestionTransitionDto(
+                gameId,
+                currentQuestion.questionNumber(),
+                currentQuestion.totalQuestions(),
+                currentQuestion.questionText(),
+                correctTeamId,
+                correctTeamName
+        );
     }
 
     public void finishGame(UUID gameId) {
@@ -155,23 +259,21 @@ public class GameSessionService {
             return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда не участвует в игре", null);
         }
 
-        // Check if this question was already answered by this team
-        Map<UUID, UUID> teamAnswers = teamAnswersCache.computeIfAbsent(request.gameId(), k -> new ConcurrentHashMap<>());
+        // Check if this team already answered the current question
+        Set<UUID> answeredTeams = teamsAnsweredForCurrentQuestion.computeIfAbsent(request.gameId(), k -> ConcurrentHashMap.newKeySet());
         
-        if (teamAnswers.containsKey(request.teamId())) {
-            UUID lastAnsweredQuestionId = teamAnswers.get(request.teamId());
-            if (lastAnsweredQuestionId != null && lastAnsweredQuestionId.equals(request.questionId())) {
-                return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос", null);
-            }
+        if (answeredTeams.contains(request.teamId())) {
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос", null);
         }
 
         boolean isCorrect = validateAnswer(request.gameId(), request.questionId(), request.answerId());
         
-        teamAnswers.put(request.teamId(), request.questionId());
+        // Mark this team as having answered
+        answeredTeams.add(request.teamId());
         
-        // Mark question as answered for this game
-        Set<UUID> answeredQuestions = answeredQuestionsCache.computeIfAbsent(request.gameId(), k -> ConcurrentHashMap.newKeySet());
-        answeredQuestions.add(request.questionId());
+        // Store team's answer
+        Map<UUID, UUID> teamAnswers = teamAnswersCache.computeIfAbsent(request.gameId(), k -> new ConcurrentHashMap<>());
+        teamAnswers.put(request.teamId(), request.questionId());
 
         if (isCorrect) {
             GameTeam gameTeam = gameTeamOptional.get();
@@ -190,31 +292,23 @@ public class GameSessionService {
                 GameTeam teamToUpdate = gameTeams.get(teamIndex);
                 teamToUpdate.setScore(currentScore + 1);
             }
+            
+            // Correct answer - move to next question and announce which team was correct
+            moveToNextQuestion(request.gameId(), request.teamId());
+        } else {
+            // Check if all teams have answered incorrectly - if so, move to next question
+            Optional<Game> updatedGameOptional = gameService.getGameById(request.gameId());
+            if (updatedGameOptional.isPresent()) {
+                int totalTeams = updatedGameOptional.get().getGameTeams().size();
+                if (answeredTeams.size() >= totalTeams) {
+                    // All teams answered - move to next question
+                    moveToNextQuestion(request.gameId(), null);
+                }
+            }
         }
 
-        // Move to next question if answer is correct
-        QuestionAnswerDto nextQuestion = null;
-        boolean shouldFinishGame = false;
-        
-        if (isCorrect) {
-            Integer currentIndex = currentQuestionIndexCache.get(request.gameId());
-            if (currentIndex == null) {
-                currentIndex = 0;
-            }
-            Integer nextIndex = currentIndex + 1;
-            
-            List<QuestionAnswerDto> questions = gameQuestionsCache.get(request.gameId());
-            if (questions != null && nextIndex < questions.size()) {
-                currentQuestionIndexCache.put(request.gameId(), nextIndex);
-                nextQuestion = questions.get(nextIndex);
-            } else {
-                // All questions answered - mark for finishing game
-                shouldFinishGame = true;
-            }
-        } else {
-            // Return current question again if answer was wrong
-            nextQuestion = getCurrentQuestion(request.gameId());
-        }
+        // Return response with current question info
+        QuestionAnswerDto currentQuestion = getCurrentQuestion(request.gameId());
 
         GameAnswerResponse response = new GameAnswerResponse(
                 request.gameId(), 
@@ -222,12 +316,8 @@ public class GameSessionService {
                 request.teamId(), 
                 isCorrect, 
                 isCorrect ? "Правильный ответ" : "Неправильный ответ",
-                nextQuestion
+                currentQuestion
         );
-        
-        if (shouldFinishGame) {
-            finishGame(request.gameId());
-        }
         
         return response;
     }
