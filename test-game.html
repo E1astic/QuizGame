@@ -291,6 +291,10 @@
                         // Персональные уведомления команды (неправильный ответ, уже ответил)
                         handleAnswerResponse(message);
                         break;
+                    case 'timer':
+                        // Обновление таймера
+                        handleTimerUpdate(message);
+                        break;
                     case 'teams':
                     case 'started':
                     case 'finished':
@@ -592,6 +596,43 @@
         }
 
         send('/app/game/finish', gameId);
+    }
+
+    function handleTimerUpdate(message) {
+        try {
+            const data = JSON.parse(message.body);
+            console.log('📩 Timer update:', data);
+
+            // Get timeLeft from the response (QuestionAnswerDto with timeLeft field)
+            const timeLeft = data.timeLeft !== undefined ? data.timeLeft : 30;
+
+            // Update timer display
+            const timerDisplay = document.getElementById('timerDisplay');
+            timerDisplay.innerText = `⏱️ ${timeLeft}`;
+
+            // Update visual state based on remaining time
+            timerDisplay.classList.remove('warning', 'critical');
+            if (timeLeft <= 5) {
+                timerDisplay.classList.add('critical');
+            } else if (timeLeft <= 10) {
+                timerDisplay.classList.add('warning');
+            }
+
+            // Handle time up - move to next question
+            if (timeLeft <= 0) {
+                log('⏰ Время вышло!', 'error');
+                
+                // If there's a next question in the data, display it
+                if (data.currentQuestion || data.questionText) {
+                    setTimeout(() => {
+                        displayQuestion(data);
+                    }, 1500);
+                }
+            }
+        } catch (e) {
+            console.error('❌ Timer parse error:', e);
+            log('💥 Ошибка парсинга таймера: ' + e.message, 'error');
+        }
     }
 </script>
 </body>
