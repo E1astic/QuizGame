@@ -482,7 +482,7 @@
                 };
                 
                 // Try to get answers from cached questions
-                const cachedQuestions = gameQuestionsCache.get(currentGameId);
+                const cachedQuestions = gameQuestionsCache[currentGameId];
                 if (cachedQuestions && Array.isArray(cachedQuestions)) {
                     const currentIndex = transition.questionNumber - 1;
                     if (currentIndex >= 0 && currentIndex < cachedQuestions.length) {
