@@ -4,10 +4,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.*;
 import ru.fil.app.game.dto.AnswerSubmitRequest;
+import ru.fil.app.game.dto.GameCreateRequest;
 import ru.fil.app.game.dto.GameStartRequest;
 import ru.fil.app.game.dto.TeamRegisterRequest;
+import ru.fil.app.game.entity.QuizGame;
 import ru.fil.app.game.service.QuizGameService;
 
 import java.util.Map;
@@ -50,12 +52,21 @@ public class QuizGameController {
     }
 
     /**
+     * REST endpoint для создания новой игры
+     */
+    @PostMapping("/api/game/create")
+    public ResponseEntity<QuizGame> createGame(@RequestBody GameCreateRequest request) {
+        QuizGame game = quizGameService.createGame(request.getQuizId());
+        return ResponseEntity.ok(game);
+    }
+
+    /**
      * REST endpoint для регистрации команды (альтернатива WebSocket)
      */
-    @org.springframework.web.bind.annotation.PostMapping("/api/game/{gameId}/register")
+    @PostMapping("/api/game/{gameId}/register")
     public ResponseEntity<Void> registerTeamRest(
-            @org.springframework.web.bind.annotation.PathVariable UUID gameId,
-            @org.springframework.web.bind.annotation.RequestParam UUID teamId) {
+            @PathVariable UUID gameId,
+            @RequestParam UUID teamId) {
         quizGameService.registerTeam(gameId, teamId);
         return ResponseEntity.ok().build();
     }
@@ -63,9 +74,9 @@ public class QuizGameController {
     /**
      * REST endpoint для старта игры (альтернатива WebSocket)
      */
-    @org.springframework.web.bind.annotation.PostMapping("/api/game/{gameId}/start")
+    @PostMapping("/api/game/{gameId}/start")
     public ResponseEntity<Void> startGameRest(
-            @org.springframework.web.bind.annotation.PathVariable UUID gameId) {
+            @PathVariable UUID gameId) {
         quizGameService.startGame(gameId);
         return ResponseEntity.ok().build();
     }
@@ -73,8 +84,8 @@ public class QuizGameController {
     /**
      * REST endpoint для отправки ответа (альтернатива WebSocket)
      */
-    @org.springframework.web.bind.annotation.PostMapping("/api/game/answer")
-    public ResponseEntity<Void> submitAnswerRest(@org.springframework.web.bind.annotation.RequestBody AnswerSubmitRequest request) {
+    @PostMapping("/api/game/answer")
+    public ResponseEntity<Void> submitAnswerRest(@RequestBody AnswerSubmitRequest request) {
         quizGameService.submitAnswer(request);
         return ResponseEntity.ok().build();
     }
@@ -82,9 +93,9 @@ public class QuizGameController {
     /**
      * REST endpoint для получения текущих счетов
      */
-    @org.springframework.web.bind.annotation.GetMapping("/api/game/{gameId}/scores")
+    @GetMapping("/api/game/{gameId}/scores")
     public ResponseEntity<Map<UUID, Integer>> getScores(
-            @org.springframework.web.bind.annotation.PathVariable UUID gameId) {
+            @PathVariable UUID gameId) {
         return ResponseEntity.ok(quizGameService.getGameScores(gameId));
     }
 }

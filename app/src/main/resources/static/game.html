@@ -128,6 +128,16 @@
             ❌ Not connected
         </div>
 
+        <!-- Create Game Section -->
+        <div id="createGameSection" class="form-group">
+            <h2>Создание новой игры</h2>
+            <div class="form-group">
+                <label for="quizId">ID квиза:</label>
+                <input type="text" id="quizId" placeholder="Введите UUID квиза">
+            </div>
+            <button onclick="createGame()">Создать игру</button>
+        </div>
+
         <!-- Connection Form -->
         <div id="connectionForm" class="form-group">
             <h2>Подключение к игре</h2>
@@ -140,6 +150,7 @@
                 <input type="text" id="teamId" placeholder="Введите UUID команды">
             </div>
             <button onclick="connect()">Подключиться</button>
+            <button onclick="disconnect()" id="disconnectBtn" disabled>Отключиться</button>
         </div>
 
         <!-- Game Controls -->
@@ -147,6 +158,7 @@
             <h2>Управление игрой</h2>
             <button onclick="registerTeam()">Зарегистрировать команду</button>
             <button onclick="startGame()" id="startBtn">Начать игру</button>
+            <button onclick="fetchScores()">Обновить счета</button>
         </div>
 
         <!-- Question Display -->
@@ -174,27 +186,84 @@
         let stompClient = null;
         let currentGameId = null;
         let currentTeamId = null;
+        let isConnected = false;
 
-        function log(message) {
+        // Подробное логирование с разными уровнями
+        function log(message, level = 'INFO') {
             const logDiv = document.getElementById('log');
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            const timestamp = new Date().toLocaleTimeString();
+            const levelColors = {
+                'INFO': '#2196F3',
+                'SUCCESS': '#4CAF50',
+                'ERROR': '#f44336',
+                'WARNING': '#ff9800',
+                'GAME': '#9C27B0'
+            };
+            entry.innerHTML = `<span style="color: ${levelColors[level] || '#333'}">[${level}]</span> [${timestamp}] ${message}`;
             logDiv.appendChild(entry);
             logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${level}] ${message}`);
         }
 
         function updateConnectionStatus(connected) {
+            isConnected = connected;
             const statusDiv = document.getElementById('connectionStatus');
+            const connectBtn = document.querySelector('#connectionForm button');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
             if (connected) {
                 statusDiv.className = 'status connected';
-                statusDiv.textContent = '✅ Подключено';
+                statusDiv.textContent = '✅ Подключено к WebSocket';
+                if (connectBtn) connectBtn.disabled = true;
+                if (disconnectBtn) disconnectBtn.disabled = false;
             } else {
                 statusDiv.className = 'status disconnected';
                 statusDiv.textContent = '❌ Не подключено';
+                if (connectBtn) connectBtn.disabled = false;
+                if (disconnectBtn) disconnectBtn.disabled = true;
             }
         }
 
+        // Создание новой игры
+        async function createGame() {
+            const quizId = document.getElementById('quizId').value.trim();
+            
+            if (!quizId) {
+                alert('Пожалуйста, введите ID квиза');
+                return;
+            }
+
+            try {
+                log('Создание новой игры для квиза: ' + quizId, 'INFO');
+                
+                const response = await fetch('/api/game/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ quizId: quizId })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentGameId = data.id || data.gameId;
+                    document.getElementById('gameId').value = currentGameId;
+                    log('✅ Игра создана! ID: ' + currentGameId, 'SUCCESS');
+                    log('Теперь вы можете зарегистрировать команду и подключиться к игре', 'GAME');
+                } else {
+                    const errorText = await response.text();
+                    log('❌ Ошибка создания игры: ' + errorText, 'ERROR');
+                    alert('Ошибка создания игры: ' + errorText);
+                }
+            } catch (error) {
+                log('❌ Ошибка соединения при создании игры: ' + error.message, 'ERROR');
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Подключение к WebSocket
         function connect() {
             currentGameId = document.getElementById('gameId').value.trim();
             currentTeamId = document.getElementById('teamId').value.trim();
@@ -204,50 +273,111 @@
                 return;
             }
 
+            if (stompClient && stompClient.connected) {
+                log('⚠️ Уже подключено. Сначала отключитесь.', 'WARNING');
+                return;
+            }
+
+            log('Подключение к WebSocket для игры: ' + currentGameId + ', команда: ' + currentTeamId, 'INFO');
+
             // Connect to WebSocket
             const socket = new SockJS('/ws-game');
             stompClient = Stomp.over(socket);
 
+            // Включаем отладочное логирование STOMP
+            stompClient.debug = function(str) {
+                log('STOMP: ' + str, 'INFO');
+            };
+
             stompClient.connect({}, function(frame) {
-                log('Успешное подключение к WebSocket: ' + frame);
+                log('✅ Успешное подключение к WebSocket: ' + frame, 'SUCCESS');
                 updateConnectionStatus(true);
                 document.getElementById('connectionForm').classList.add('hidden');
                 document.getElementById('gameControls').classList.remove('hidden');
 
                 // Subscribe to game topics
                 subscribeToGame(currentGameId);
+                
+                log('📡 Подписки на темы игры оформлены', 'GAME');
             }, function(error) {
-                log('Ошибка подключения: ' + error);
+                log('❌ Ошибка подключения: ' + error, 'ERROR');
                 updateConnectionStatus(false);
+                alert('Не удалось подключиться к WebSocket. Проверьте консоль браузера.');
             });
         }
 
+        // Отключение от WebSocket
+        function disconnect() {
+            if (stompClient) {
+                log('Отключение от WebSocket...', 'INFO');
+                
+                // Отписка от всех подписок
+                stompClient.unsubscribe('/topic/game/' + currentGameId + '/question');
+                stompClient.unsubscribe('/topic/game/' + currentGameId + '/wrong-answer');
+                stompClient.unsubscribe('/topic/game/' + currentGameId + '/finished');
+                
+                stompClient.disconnect(function() {
+                    log('✅ Успешно отключено от WebSocket', 'SUCCESS');
+                    stompClient = null;
+                    isConnected = false;
+                    updateConnectionStatus(false);
+                    
+                    // Сбрасываем UI
+                    document.getElementById('questionBox').style.display = 'none';
+                    document.getElementById('scoresBox').classList.add('hidden');
+                    document.getElementById('connectionForm').classList.remove('hidden');
+                    document.getElementById('gameControls').classList.add('hidden');
+                }, {});
+            } else {
+                log('⚠️ Нет активного соединения', 'WARNING');
+            }
+        }
+
         function subscribeToGame(gameId) {
+            log('📡 Подписка на обновления игры: ' + gameId, 'INFO');
+            
             // Subscribe to question updates
             stompClient.subscribe('/topic/game/' + gameId + '/question', function(message) {
-                log('Получен вопрос: ' + message.body);
-                showQuestion(JSON.parse(message.body));
+                log('📥 Получен вопрос: ' + message.body, 'GAME');
+                try {
+                    const questionData = JSON.parse(message.body);
+                    showQuestion(questionData);
+                    log('✅ Вопрос отображен', 'SUCCESS');
+                } catch (e) {
+                    log('❌ Ошибка парсинга вопроса: ' + e.message, 'ERROR');
+                }
             });
 
             // Subscribe to wrong answer notifications
             stompClient.subscribe('/topic/game/' + gameId + '/wrong-answer', function(message) {
-                log('Неправильный ответ: ' + message.body);
-                const data = JSON.parse(message.body);
-                alert('Неправильный ответ! Попробуйте другой вариант.');
+                log('❌ Получено уведомление о неправильном ответе: ' + message.body, 'WARNING');
+                try {
+                    const data = JSON.parse(message.body);
+                    alert('Неправильный ответ! Попробуйте другой вариант.');
+                    log('Команда ' + data.teamId + ' получила уведомление о неправильном ответе', 'WARNING');
+                } catch (e) {
+                    log('❌ Ошибка парсинга уведомления: ' + e.message, 'ERROR');
+                }
             });
 
             // Subscribe to game finished event
             stompClient.subscribe('/topic/game/' + gameId + '/finished', function(message) {
-                log('Игра завершена: ' + message.body);
-                const data = JSON.parse(message.body);
-                showFinalResults(data);
+                log('🏁 Игра завершена: ' + message.body, 'GAME');
+                try {
+                    const data = JSON.parse(message.body);
+                    showFinalResults(data);
+                    log('✅ Результаты игры отображены', 'SUCCESS');
+                } catch (e) {
+                    log('❌ Ошибка парсинга результатов: ' + e.message, 'ERROR');
+                }
             });
 
-            log('Подписка на обновления игры: ' + gameId);
+            log('✅ Все подписки на игру оформлены успешно', 'SUCCESS');
         }
 
         function registerTeam() {
             if (!stompClient || !stompClient.connected) {
+                log('❌ Сначала подключитесь к игре', 'ERROR');
                 alert('Сначала подключитесь к игре');
                 return;
             }
@@ -257,13 +387,15 @@
                 teamId: currentTeamId
             };
 
+            log('📤 Отправка запроса на регистрацию команды: ' + JSON.stringify(request), 'INFO');
             stompClient.send('/app/game/register', {}, JSON.stringify(request));
-            log('Отправлен запрос на регистрацию команды');
+            log('✅ Запрос на регистрацию команды отправлен', 'SUCCESS');
             alert('Команда зарегистрирована!');
         }
 
         function startGame() {
             if (!stompClient || !stompClient.connected) {
+                log('❌ Сначала подключитесь к игре', 'ERROR');
                 alert('Сначала подключитесь к игре');
                 return;
             }
@@ -272,12 +404,15 @@
                 gameId: currentGameId
             };
 
+            log('📤 Отправка запроса на старт игры: ' + JSON.stringify(request), 'INFO');
             stompClient.send('/app/game/start', {}, JSON.stringify(request));
-            log('Отправлен запрос на старт игры');
+            log('✅ Запрос на старт игры отправлен', 'SUCCESS');
             document.getElementById('startBtn').disabled = true;
         }
 
         function showQuestion(questionData) {
+            log('📋 Отображение вопроса #' + questionData.questionNumber, 'GAME');
+            
             const questionBox = document.getElementById('questionBox');
             const questionNumber = document.getElementById('questionNumber');
             const questionText = document.getElementById('questionText');
@@ -287,20 +422,22 @@
             questionText.textContent = questionData.questionText;
 
             answersDiv.innerHTML = '';
-            questionData.answers.forEach(answer => {
+            questionData.answers.forEach((answer, index) => {
                 const btn = document.createElement('button');
                 btn.className = 'answer-btn';
                 btn.textContent = answer.answerText;
-                btn.onclick = () => submitAnswer(questionData.questionId, answer.answerId);
+                btn.onclick = () => submitAnswer(questionData.questionId, answer.answerId, index);
                 answersDiv.appendChild(btn);
             });
 
             questionBox.style.display = 'block';
             document.getElementById('scoresBox').classList.add('hidden');
+            log('✅ Вопрос отображен с ' + questionData.answers.length + ' вариантами ответа', 'SUCCESS');
         }
 
-        function submitAnswer(questionId, answerId) {
+        function submitAnswer(questionId, answerId, answerIndex) {
             if (!stompClient || !stompClient.connected) {
+                log('❌ Нет подключения к серверу', 'ERROR');
                 alert('Нет подключения к серверу');
                 return;
             }
@@ -312,11 +449,14 @@
                 answerId: answerId
             };
 
+            log(`📤 Отправка ответа: команда=${currentTeamId}, вопрос=${questionId}, ответ=${answerId} (вариант #${answerIndex + 1})`, 'INFO');
             stompClient.send('/app/game/answer', {}, JSON.stringify(request));
-            log(`Отправлен ответ: команда=${currentTeamId}, вопрос=${questionId}, ответ=${answerId}`);
+            log('✅ Ответ отправлен на сервер', 'SUCCESS');
         }
 
         function showFinalResults(data) {
+            log('🏁 Отображение финальных результатов', 'GAME');
+            
             const scoresBox = document.getElementById('scoresBox');
             const scoresList = document.getElementById('scoresList');
             const questionBox = document.getElementById('questionBox');
@@ -327,25 +467,31 @@
             scoresList.innerHTML = '<h3>🏆 Результаты игры</h3>';
             
             const scores = data.scores || {};
-            Object.entries(scores).forEach(([teamId, score]) => {
+            const sortedScores = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+            
+            sortedScores.forEach(([teamId, score], index) => {
                 const item = document.createElement('div');
                 item.className = 'score-item';
-                item.innerHTML = `<span>Команда ${teamId.substring(0, 8)}...</span><strong>${score} очков</strong>`;
+                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+                item.innerHTML = `<span>${medal} Команда ${teamId.substring(0, 8)}...</span><strong>${score} очков</strong>`;
                 scoresList.appendChild(item);
+                log(`📊 Результат команды ${teamId.substring(0, 8)}: ${score} очков (место #${index + 1})`, 'INFO');
             });
 
             document.getElementById('startBtn').disabled = false;
+            log('✅ Результаты игры отображены', 'SUCCESS');
         }
 
         function fetchScores() {
             if (!currentGameId) return;
 
+            log('📊 Запрос текущих счетов...', 'INFO');
             fetch(`/api/game/${currentGameId}/scores`)
                 .then(response => response.json())
                 .then(data => {
-                    log('Текущие счета: ' + JSON.stringify(data));
+                    log('📈 Текущие счета: ' + JSON.stringify(data), 'INFO');
                 })
-                .catch(error => log('Ошибка получения счетов: ' + error));
+                .catch(error => log('❌ Ошибка получения счетов: ' + error, 'ERROR'));
         }
     </script>
 </body>
