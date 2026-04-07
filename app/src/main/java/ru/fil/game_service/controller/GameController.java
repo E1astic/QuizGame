@@ -64,20 +64,6 @@ public class GameController {
     @MessageMapping("/game/answer")
     public ResponseEntity<GameAnswerResponse> submitAnswer(@Payload GameAnswerRequest request) {
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
-
-        // Send response to the specific team that answered (private message)
-        messagingTemplate.convertAndSendToUser(
-                request.teamId().toString(),
-                "/queue/answer-response",
-                response
-        );
-
-        // If answer is correct, notify all teams about it (public message)
-        if (response.correct()) {
-            messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer",
-                    new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), true,
-                            "Команда " + request.teamId() + " дала правильный ответ!", response.currentQuestion()));
-        }
         return ResponseEntity.ok(response);
     }
 
