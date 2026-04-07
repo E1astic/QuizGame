@@ -551,6 +551,13 @@
         });
         document.getElementById('submitAnswerBtn').disabled = false;
     }
+    
+    function disableAnswerButtons() {
+        document.querySelectorAll('.answerOption').forEach(btn => {
+            btn.disabled = true;
+        });
+        document.getElementById('submitAnswerBtn').disabled = true;
+    }
 
     function submitSelectedAnswer() {
         if (!selectedAnswerId || !currentQuestion) {
@@ -612,9 +619,9 @@
 
             // Update visual state based on remaining time
             timerDisplay.classList.remove('warning', 'critical');
-            if (timeLeft <= 5) {
+            if (timeLeft <= 5 && timeLeft > 0) {
                 timerDisplay.classList.add('critical');
-            } else if (timeLeft <= 10) {
+            } else if (timeLeft <= 10 && timeLeft > 0) {
                 timerDisplay.classList.add('warning');
             }
 
@@ -622,10 +629,27 @@
             if (timeLeft <= 0) {
                 log('⏰ Время вышло!', 'error');
                 
+                // Reset timer display to show initial time for next question
+                timerDisplay.innerText = '⏱️ 30';
+                timerDisplay.classList.remove('warning', 'critical');
+                
+                // Disable answer buttons during transition
+                isAnswering = true;
+                disableAnswerButtons();
+                
                 // If there's a next question in the data, display it
-                if (data.currentQuestion || data.questionText) {
+                // Check for next question using the fields from QuestionAnswerDto
+                if (data.questionText && data.questionNumber) {
                     setTimeout(() => {
                         displayQuestion(data);
+                        isAnswering = false;
+                        enableAnswerButtons();
+                    }, 1500);
+                } else {
+                    // No more questions - game finished
+                    log('🏆 Игра завершена!', 'success');
+                    setTimeout(() => {
+                        document.getElementById('questionSection').style.display = 'none';
                     }, 1500);
                 }
             }

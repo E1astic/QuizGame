@@ -255,8 +255,13 @@ public class GameSessionService {
             AnswerResultType.INCORRECT
         );
         
-        // Send time up notification to all clients
+        // Send time up notification to all clients via answer topic
         messagingTemplate.convertAndSend("/topic/game/" + gameId + "/answer", response);
+        
+        // Also send the next question via timer topic so clients can update display
+        if (nextQuestion != null) {
+            messagingTemplate.convertAndSend("/topic/game/" + gameId + "/timer", nextQuestion);
+        }
         
         if (shouldFinishGame) {
             finishGame(gameId);
