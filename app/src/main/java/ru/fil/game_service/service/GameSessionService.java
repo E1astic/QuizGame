@@ -317,9 +317,6 @@ public class GameSessionService {
         game.setFinishedAt(java.time.OffsetDateTime.now());
         gameService.saveGame(game);
         
-        // Flush to ensure all stats are saved before clearing session
-        entityManager.flush();
-        
         log.info("🏆 Игра завершена! Победитель: {}", winningTeamId != null ? winningTeamId : "Нет победителя");
         
         clearGameSession(gameId);
