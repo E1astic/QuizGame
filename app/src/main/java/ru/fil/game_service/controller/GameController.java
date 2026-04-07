@@ -79,13 +79,19 @@ public class GameController {
         
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
         
-        // Send answer response only to the team that answered (using queue)
-        messagingTemplate.convertAndSendToUser(
-            request.teamId().toString(), 
-            "/queue/answer", 
-            response
-        );
-        log.info("📤 Controller: Sent answer response to team /queue/answer");
+        if (response.correct()) {
+            // Отправляем сообщение о правильном ответе всем участникам в общий топик
+            log.info("✅ Team {} answered correctly. Broadcasting to all.", request.teamId());
+            messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer", response);
+        } else {
+            // Отправляем сообщение о неправильном ответе ТОЛЬКО этой команде через личную очередь
+            log.info("❌ Team {} answered incorrectly. Sending private message.", request.teamId());
+            messagingTemplate.convertAndSendToUser(
+                request.teamId().toString(), 
+                "/queue/answer", 
+                response
+            );
+        }
         
         // Transition is already sent by moveToNextQuestion in service via callback
         // No need to send it again here - the service handles all transition logic

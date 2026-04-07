@@ -215,7 +215,6 @@
             { name: 'teams', path: `${prefix}/teams` },
             { name: 'started', path: `${prefix}/started` },
             { name: 'questions', path: `${prefix}/questions` },
-            { name: 'answer', path: `${prefix}/answer` },
             { name: 'finished', path: `${prefix}/finished` },
             { name: 'transition', path: `${prefix}/transition` }
         ];
@@ -234,9 +233,6 @@
                 switch(name) {
                     case 'questions':
                         handleQuestions(message);
-                        break;
-                    case 'answer':
-                        handleAnswerResponse(message);
                         break;
                     case 'transition':
                         handleTransition(message);
