@@ -53,7 +53,7 @@ public class GameSessionService {
     public void loadGameQuestions(UUID gameId) {
         Optional<Game> gameOptional = gameService.getGameById(gameId);
         if (gameOptional.isEmpty()) {
-            throw new IllegalStateException("Игра не найдена");
+            throw new IllegalStateException("Game not found");
         }
 
         Game game = gameOptional.get();
@@ -139,7 +139,7 @@ public class GameSessionService {
 
     public void startGame(UUID gameId) {
         Game game = gameService.getGameById(gameId)
-                .orElseThrow(() -> new IllegalStateException("Игра не найдена"));
+                .orElseThrow(() -> new IllegalStateException("Game not found"));
         
         loadGameQuestions(gameId);
         
@@ -153,27 +153,27 @@ public class GameSessionService {
     
     private void startQuestionTimer(UUID gameId) {
         questionStartTimeCache.put(gameId, OffsetDateTime.now());
-        log.info("⏱️ Запущен таймер на {} секунд для игры {}", QUESTION_TIME_LIMIT_SECONDS, gameId);
+        log.info("⏱️ Timer started for {} seconds for game {}", QUESTION_TIME_LIMIT_SECONDS, gameId);
         
         scheduler.schedule(() -> {
             try {
-                log.info("⏰ Время вышло для игры {}, проверяем текущий вопрос", gameId);
+                log.info("⏰ Time is up for game {}, checking current question", gameId);
                 QuestionAnswerDto currentQuestion = getCurrentQuestion(gameId);
                 if (currentQuestion != null) {
-                    log.info("⏰ Время вышло! Переход к следующему вопросу");
+                    log.info("⏰ Time is up! Moving to next question");
                     // Time's up - move to next question
                     moveToNextQuestion(gameId, null);
                 } else {
-                    log.info("⏰ Время вышло, но текущий вопрос не найден (возможно игра уже закончена)");
+                    log.info("⏰ Time is up, but current question not found (maybe game already finished)");
                 }
             } catch (Exception e) {
-                log.error("❌ Ошибка в таймере для игры {}", gameId, e);
+                log.error("❌ Error in timer for game {}", gameId, e);
             }
         }, QUESTION_TIME_LIMIT_SECONDS, TimeUnit.SECONDS);
     }
     
     private void moveToNextQuestion(UUID gameId, UUID correctTeamId) {
-        log.info("🔄 Переход к следующему вопросу. Игра: {}, Правильная команда: {}", gameId, correctTeamId);
+        log.info("🔄 Moving to next question. Game: {}, Correct team: {}", gameId, correctTeamId);
         
         Integer currentIndex = currentQuestionIndexCache.get(gameId);
         if (currentIndex == null) {
@@ -192,11 +192,11 @@ public class GameSessionService {
             teamsAnsweredForCurrentQuestion.computeIfAbsent(gameId, k -> ConcurrentHashMap.newKeySet());
             // Start timer for the new question
             startQuestionTimer(gameId);
-            log.info("📍 Перешли к вопросу {} из {}", nextQuestion.questionNumber(), questions.size());
+            log.info("📍 Moved to question {} out of {}", nextQuestion.questionNumber(), questions.size());
         } else {
             // All questions answered - finish game
             shouldFinishGame = true;
-            log.info("🏁 Все вопросы пройдены, завершаем игру");
+            log.info("🏁 All questions completed, finishing game");
         }
         
         // Clear answered teams for this question
@@ -209,23 +209,23 @@ public class GameSessionService {
         
         // Notify about question transition (this will be handled by controller via callback)
         if (questionTransitionCallback != null) {
-            log.info("🔔 Вызов callback для уведомления о переходе");
+            log.info("🔔 Calling callback to notify about transition");
             questionTransitionCallback.run();
         } else {
-            log.info("⚠️ Callback не установлен, уведомление о переходе не отправлено");
+            log.info("⚠️ Callback not set, transition notification not sent");
         }
     }
     
     public QuestionTransitionDto createQuestionTransition(UUID gameId, UUID correctTeamId) {
-        log.info("📋 Создание перехода для игры {}, правильная команда: {}", gameId, correctTeamId);
+        log.info("📋 Creating transition for game {}, correct team: {}", gameId, correctTeamId);
         
         QuestionAnswerDto currentQuestion = getCurrentQuestion(gameId);
         if (currentQuestion == null) {
-            log.warn("⚠️ Текущий вопрос не найден для игры {}", gameId);
+            log.warn("⚠️ Current question not found for game {}", gameId);
             return null;
         }
         
-        log.info("📍 Текущий вопрос: {} из {}", currentQuestion.questionNumber(), currentQuestion.totalQuestions());
+        log.info("📍 Current question: {} out of {}", currentQuestion.questionNumber(), currentQuestion.totalQuestions());
         
         String correctTeamName = null;
         if (correctTeamId != null) {
@@ -234,7 +234,7 @@ public class GameSessionService {
                 for (GameTeam gameTeam : gameOptional.get().getGameTeams()) {
                     if (gameTeam.getGameTeamId().getTeamId().equals(correctTeamId)) {
                         correctTeamName = gameTeam.getTeam().getName();
-                        log.info("✅ Найдено имя правильной команды: {}", correctTeamName);
+                        log.info("✅ Found correct team name: {}", correctTeamName);
                         break;
                     }
                 }
@@ -250,15 +250,15 @@ public class GameSessionService {
                 correctTeamName
         );
         
-        log.info("📤 Создан переход: вопрос {}, правильная команда: {}", 
-                currentQuestion.questionNumber(), correctTeamName != null ? correctTeamName : "нет");
+        log.info("📤 Created transition: question {}, correct team: {}", 
+                currentQuestion.questionNumber(), correctTeamName != null ? correctTeamName : "none");
         
         return transition;
     }
 
     public void finishGame(UUID gameId) {
         Game game = gameService.getGameById(gameId)
-                .orElseThrow(() -> new IllegalStateException("Игра не найдена"));
+                .orElseThrow(() -> new IllegalStateException("Game not found"));
         
         game.setStatus(GameStatus.FINISHED);
         game.setFinishedAt(java.time.OffsetDateTime.now());
@@ -269,41 +269,41 @@ public class GameSessionService {
 
     @Transactional
     public GameAnswerResponse submitAnswer(GameAnswerRequest request) {
-        log.info("📥 Получен ответ от команды {} на вопрос {} в игре {}", 
+        log.info("📥 Received answer from team {} for question {} in game {}", 
                 request.teamId(), request.questionId(), request.gameId());
         
         Optional<Game> gameOptional = gameService.getGameById(request.gameId());
         if (gameOptional.isEmpty()) {
-            log.warn("⚠️ Игра не найдена: {}", request.gameId());
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не найдена", null);
+            log.warn("⚠️ Game not found: {}", request.gameId());
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Game not found", null);
         }
 
         Game game = gameOptional.get();
         if (game.getStatus() != GameStatus.IN_PROGRESS) {
-            log.warn("⚠️ Игра не активна: {}", request.gameId());
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Игра не активна", null);
+            log.warn("⚠️ Game is not active: {}", request.gameId());
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Game is not active", null);
         }
 
         Optional<GameTeam> gameTeamOptional = gameTeamRepository.findByGameIdAndTeamId(request.gameId(), request.teamId());
         if (gameTeamOptional.isEmpty()) {
-            log.warn("⚠️ Команда не участвует в игре: {}", request.teamId());
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда не участвует в игре", null);
+            log.warn("⚠️ Team is not participating in the game: {}", request.teamId());
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Team is not participating in the game", null);
         }
 
         // Check if this team already answered the current question
         Set<UUID> answeredTeams = teamsAnsweredForCurrentQuestion.computeIfAbsent(request.gameId(), k -> ConcurrentHashMap.newKeySet());
         
         if (answeredTeams.contains(request.teamId())) {
-            log.info("ℹ️ Команда уже ответила на этот вопрос: {}", request.teamId());
-            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Команда уже ответила на этот вопрос", null);
+            log.info("ℹ️ Team already answered this question: {}", request.teamId());
+            return new GameAnswerResponse(request.gameId(), request.questionId(), request.teamId(), false, "Team already answered this question", null);
         }
 
         boolean isCorrect = validateAnswer(request.gameId(), request.questionId(), request.answerId());
-        log.info("✅ Ответ правильный: {}", isCorrect);
+        log.info("✅ Answer is correct: {}", isCorrect);
         
         // Mark this team as having answered
         answeredTeams.add(request.teamId());
-        log.info("📊 Команды, ответившие на текущий вопрос: {}", answeredTeams.size());
+        log.info("📊 Teams that answered current question: {}", answeredTeams.size());
         
         // Store team's answer
         Map<UUID, UUID> teamAnswers = teamAnswersCache.computeIfAbsent(request.gameId(), k -> new ConcurrentHashMap<>());
@@ -327,17 +327,17 @@ public class GameSessionService {
                 teamToUpdate.setScore(currentScore + 1);
             }
             
-            log.info("🎉 Команда {} ответила правильно! Переход к следующему вопросу.", request.teamId());
+            log.info("🎉 Team {} answered correctly! Moving to next question.", request.teamId());
             // Correct answer - move to next question and announce which team was correct
             moveToNextQuestion(request.gameId(), request.teamId());
         } else {
             // Check if all teams have answered incorrectly - if so, move to next question
             int totalTeams = game.getGameTeams().size();
-            log.info("❌ Неправильный ответ. Ответили команд: {} из {}", answeredTeams.size(), totalTeams);
+            log.info("❌ Wrong answer. Teams answered: {} out of {}", answeredTeams.size(), totalTeams);
             
             if (answeredTeams.size() >= totalTeams) {
                 // All teams answered - move to next question
-                log.info("🔄 Все команды ответили неправильно. Переход к следующему вопросу.");
+                log.info("🔄 All teams answered incorrectly. Moving to next question.");
                 moveToNextQuestion(request.gameId(), null);
             }
         }
@@ -350,11 +350,11 @@ public class GameSessionService {
                 request.questionId(), 
                 request.teamId(), 
                 isCorrect, 
-                isCorrect ? "Правильный ответ" : "Неправильный ответ",
+                isCorrect ? "Correct answer" : "Wrong answer",
                 currentQuestion
         );
         
-        log.info("📤 Отправка ответа команде: {}", response.message());
+        log.info("📤 Sending response to team: {}", response.message());
         return response;
     }
 }

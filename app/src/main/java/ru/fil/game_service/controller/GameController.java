@@ -74,7 +74,7 @@ public class GameController {
 
     @MessageMapping("/game/answer")
     public ResponseEntity<GameAnswerResponse> submitAnswer(@Payload GameAnswerRequest request) {
-        log.info("📥 Контроллер: Получен ответ от команды {} на вопрос {} в игре {}", 
+        log.info("📥 Controller: Received answer from team {} for question {} in game {}", 
                 request.teamId(), request.questionId(), request.gameId());
         
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
@@ -85,43 +85,26 @@ public class GameController {
             "/queue/answer", 
             response
         );
-        log.info("📤 Контроллер: Отправлен ответ команде в /queue/answer");
+        log.info("📤 Controller: Sent answer response to team /queue/answer");
         
-        // If the answer was correct, broadcast the question transition to all teams
-        if (response.correct()) {
-            log.info("✅ Контроллер: Ответ правильный, отправляем переход к вопросу всем");
-            QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
-                request.gameId(), 
-                request.teamId()
+        // Always check and send transition if needed (correct answer, all teams answered, or timeout)
+        QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
+            request.gameId(), 
+            response.correct() ? request.teamId() : null
+        );
+        
+        if (transition != null && transition.questionNumber() != null) {
+            String message = transition.correctTeamName() != null 
+                ? "Team \"" + transition.correctTeamName() + "\" answered correctly! Moving to question " + transition.questionNumber() 
+                : "Moving to question " + transition.questionNumber();
+            
+            log.info("📢 Controller: Sending transition message: {}", message);
+            messagingTemplate.convertAndSend(
+                "/topic/game/" + request.gameId() + "/transition",
+                transition
             );
-            if (transition != null) {
-                String message = transition.correctTeamName() != null 
-                    ? "Команда \"" + transition.correctTeamName() + "\" ответила правильно! Переходим к вопросу " + transition.questionNumber() 
-                    : "Переходим к вопросу " + transition.questionNumber();
-                
-                log.info("📢 Контроллер: Отправка сообщения о переходе: {}", message);
-                messagingTemplate.convertAndSend(
-                    "/topic/game/" + request.gameId() + "/transition",
-                    transition
-                );
-            }
         } else {
-            // Check if all teams have answered - if so, broadcast transition without correct team
-            log.info("❌ Контроллер: Ответ неправильный, проверяем переход");
-            QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
-                request.gameId(), 
-                null
-            );
-            if (transition != null && transition.questionNumber() != null) {
-                // This means we're moving to next question because all teams answered incorrectly
-                log.info("📢 Контроллер: Все команды ответили, отправляем переход без правильной команды");
-                messagingTemplate.convertAndSend(
-                    "/topic/game/" + request.gameId() + "/transition",
-                    transition
-                );
-            } else {
-                log.info("ℹ️ Контроллер: Переход не требуется (еще не все ответили или игра закончена)");
-            }
+            log.info("ℹ️ Controller: No transition needed yet (not all teams answered or game finished)");
         }
         
         return ResponseEntity.ok(response);
