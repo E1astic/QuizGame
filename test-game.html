@@ -130,6 +130,7 @@
     <h2>📝 Текущий вопрос</h2>
     <div id="questionDisplay">
         <div id="questionProgress">Вопрос <span id="currentQuestionNum">-</span> из <span id="totalQuestions">-</span></div>
+        <div id="timerDisplay" style="font-size: 1.5em; font-weight: bold; color: #dc3545; text-align: center; margin: 10px 0;">⏱️ <span id="timeRemaining">30</span> сек.</div>
         <div id="questionText">Загрузка вопроса...</div>
         <div id="answersContainer"></div>
         <button id="submitAnswerBtn" onclick="submitSelectedAnswer()" disabled>Ответить</button>
@@ -150,6 +151,9 @@
     let currentQuestion = null;
     let selectedAnswerId = null;
     let isAnswering = false;
+    let gameQuestionsCache = {}; // Cache for questions by gameId
+    let questionTimerInterval = null; // Timer interval ID
+    const QUESTION_TIME_LIMIT = 30; // seconds
 
     function log(message, type = 'info') {
         const logDiv = document.getElementById('log');
@@ -170,41 +174,23 @@
 
         stompClient.connect({ host: '/' },
             function(frame) {
-                log('✅ Подключено', 'success');
-                document.getElementById('connectionStatus').innerText = 'Статус: Подключено';
+                log('✅ Connected', 'success');
+                document.getElementById('connectionStatus').innerText = 'Status: Connected';
 
-                // ✅ Подписка на ответы — ТОЛЬКО ОДИН РАЗ при подключении
-                responseSubscription = stompClient.subscribe('/user/queue/response', handleGameResponse);
+                // ✅ Subscribe to answers - ONLY ONCE on connect
+                responseSubscription = stompClient.subscribe('/user/queue/answer', handleAnswerResponse);
             },
             function(error) {
-                log('❌ Ошибка: ' + error, 'error');
+                log('❌ Error: ' + error, 'error');
                 console.error('STOMP error:', error);
             }
         );
     }
 
-    // 🔍 Вынесенный обработчик — чистый и переиспользуемый
-    function handleGameResponse(message) {
-        try {
-            const response = JSON.parse(message.body);
-            console.log('📩 Game response:', response);
-
-            if (response.gameId) {
-                currentGameId = response.gameId;
-                document.getElementById('gameId').value = response.gameId;
-                log(`🎮 Игра создана: ${response.gameId}`, 'success');
-
-                // ✅ Теперь безопасно: currentGameId задан
-                subscribeToGameTopics();
-            }
-        } catch(e) {
-            console.error('❌ Parse error:', e);
-            log('💥 Ошибка парсинга ответа: ' + e.message, 'error');
-        }
-    }
+    // 🔍 Handler for answer responses from server - REMOVED, using the one defined later
 
     function disconnect() {
-        // ✅ Отписываемся от всех подписок
+        // ✅ Unsubscribe from all subscriptions
         if (responseSubscription) {
             responseSubscription.unsubscribe();
             responseSubscription = null;
@@ -212,7 +198,7 @@
         if (stompClient) {
             stompClient.disconnect();
             stompClient = null;
-            log('🔌 Отключено', 'info');
+            log('🔌 Disconnected', 'info');
         }
     }
 
@@ -220,7 +206,7 @@
 
     function subscribeToGameTopics() {
         if (!currentGameId) {
-            log('⚠️ currentGameId не задан, подписка отложена', 'warning');
+            log('⚠️ currentGameId not set, subscription deferred', 'warning');
             return;
         }
 
@@ -229,18 +215,18 @@
             { name: 'teams', path: `${prefix}/teams` },
             { name: 'started', path: `${prefix}/started` },
             { name: 'questions', path: `${prefix}/questions` },
-            { name: 'answer', path: `${prefix}/answer` },
-            { name: 'finished', path: `${prefix}/finished` }
+            { name: 'finished', path: `${prefix}/finished` },
+            { name: 'transition', path: `${prefix}/transition` }
         ];
 
         topics.forEach(({name, path}) => {
-            // Отписываемся от старой, если есть
+            // Unsubscribe from old one if exists
             if (topicSubscriptions[name]) {
                 topicSubscriptions[name].unsubscribe();
                 console.log(`🔄 Old subscription unsubscribed: ${name}`);
             }
 
-            // Создаём новую
+            // Create new one
             topicSubscriptions[name] = stompClient.subscribe(path, function(message) {
                 console.log(`📩 [${name}] Raw:`, message.body.substring(0, 200));
 
@@ -248,8 +234,8 @@
                     case 'questions':
                         handleQuestions(message);
                         break;
-                    case 'answer':
-                        handleAnswerResponse(message);
+                    case 'transition':
+                        handleTransition(message);
                         break;
                     case 'teams':
                     case 'started':
@@ -261,16 +247,16 @@
             console.log(`✅ Subscribed: ${path}`);
         });
 
-        log(`🔗 Подписан на топики игры ${currentGameId}`, 'success');
+        log(`🔗 Subscribed to game ${currentGameId} topics`, 'success');
     }
 
-    // ✅ Очистка при смене игры или отключении
+    // ✅ Cleanup on game change or disconnect
     function unsubscribeFromGameTopics() {
         Object.values(topicSubscriptions).forEach(sub => {
             if (sub) sub.unsubscribe();
         });
         topicSubscriptions = {};
-        log('🧹 Подписки на топики игры очищены', 'info');
+        log('🧹 Game topic subscriptions cleared', 'info');
     }
 
     function send(destination, body) {
@@ -373,12 +359,18 @@
         try {
             const rawData = message.body;
             if (!rawData || rawData.trim().length === 0) {
-                log('⚠️ Пришло пустое сообщение', 'warning');
+                log('⚠️ Received empty message', 'warning');
                 return;
             }
 
             const questions = JSON.parse(rawData);
-            log(`✅ Получено вопросов: ${Array.isArray(questions) ? questions.length : 'не массив'}`, 'success');
+            log(`✅ Received questions: ${Array.isArray(questions) ? questions.length : 'not an array'}`, 'success');
+
+            // Cache questions for this game
+            if (currentGameId && Array.isArray(questions)) {
+                gameQuestionsCache[currentGameId] = questions;
+                log(`📚 Questions cached for game ${currentGameId}`, 'info');
+            }
 
             if (Array.isArray(questions) && questions.length > 0) {
                 // Show first question
@@ -386,8 +378,8 @@
             }
         } catch (e) {
             console.error('❌ JSON Parse Error:', e);
-            log(`💥 Ошибка парсинга: ${e.message}`, 'error');
-            // Выводим первые 100 символов, чтобы понять, что пришло
+            log(`💥 Parse error: ${e.message}`, 'error');
+            // Output first 100 chars to understand what came
             log(`📄 Raw data: ${message.body.substring(0, 150)}...`, 'info');
         }
     }
@@ -411,15 +403,12 @@
                     selectedBtn.classList.add('correct');
                 }
                 
-                // Check if there's a next question
+                // Check if there's a next question - transition will be handled by handleTransition
                 if (response.currentQuestion) {
-                    log('📝 Переход к следующему вопросу', 'info');
-                    setTimeout(() => {
-                        displayQuestion(response.currentQuestion);
-                    }, 1500);
+                    log('📝 Moving to next question', 'info');
                 } else {
-                    log('🏆 Игра завершена!', 'success');
-                    resultDiv.innerText = response.message + ' Игра завершена!';
+                    log('🏆 Game finished!', 'success');
+                    resultDiv.innerText = response.message + ' Game finished!';
                 }
             } else {
                 log(`❌ ${response.message}`, 'error');
@@ -439,7 +428,50 @@
             }
         } catch (e) {
             console.error('❌ Parse error:', e);
-            log('💥 Ошибка парсинга ответа: ' + e.message, 'error');
+            log('💥 Answer parse error: ' + e.message, 'error');
+        }
+    }
+
+    function handleTransition(message) {
+        try {
+            const transition = JSON.parse(message.body);
+            console.log('📩 Transition received:', transition);
+            
+            log(`🔄 Transition to question ${transition.questionNumber}/${transition.totalQuestions}`, 'info');
+            
+            if (transition.correctTeamName) {
+                log(`✅ Team "${transition.correctTeamName}" answered correctly!`, 'success');
+            } else if (transition.correctTeamId === null) {
+                log('⏰ Time is up or all teams answered incorrectly', 'warning');
+            }
+            
+            // Display the next question
+            if (transition.questionNumber && transition.questionText) {
+                // Create a question object from transition data
+                const question = {
+                    questionId: null, // Will be populated when we get full question data
+                    questionText: transition.questionText,
+                    questionNumber: transition.questionNumber,
+                    totalQuestions: transition.totalQuestions,
+                    answers: [] // Answers will come from the questions cache or next message
+                };
+                
+                // Try to get answers from cached questions
+                const cachedQuestions = gameQuestionsCache[currentGameId];
+                if (cachedQuestions && Array.isArray(cachedQuestions)) {
+                    const currentIndex = transition.questionNumber - 1;
+                    if (currentIndex >= 0 && currentIndex < cachedQuestions.length) {
+                        const cachedQuestion = cachedQuestions[currentIndex];
+                        question.questionId = cachedQuestion.questionId;
+                        question.answers = cachedQuestion.answers || [];
+                    }
+                }
+                
+                displayQuestion(question);
+            }
+        } catch (e) {
+            console.error('❌ Parse error in handleTransition:', e);
+            log('💥 Transition parse error: ' + e.message, 'error');
         }
     }
 
@@ -454,6 +486,10 @@
         // Update progress
         document.getElementById('currentQuestionNum').innerText = question.questionNumber || '?';
         document.getElementById('totalQuestions').innerText = question.totalQuestions || '?';
+        
+        // Reset and start timer
+        resetTimer();
+        startTimer();
         
         // Update question text
         document.getElementById('questionText').innerText = question.questionText;
@@ -480,6 +516,34 @@
         document.getElementById('submitAnswerBtn').disabled = true;
         
         log(`📝 Вопрос ${question.questionNumber}/${question.totalQuestions}: ${question.questionText}`, 'info');
+    }
+    
+    function startTimer() {
+        let timeLeft = QUESTION_TIME_LIMIT;
+        document.getElementById('timeRemaining').innerText = timeLeft;
+        
+        // Clear any existing timer
+        if (questionTimerInterval) {
+            clearInterval(questionTimerInterval);
+        }
+        
+        questionTimerInterval = setInterval(() => {
+            timeLeft--;
+            document.getElementById('timeRemaining').innerText = timeLeft;
+            
+            if (timeLeft <= 0) {
+                clearInterval(questionTimerInterval);
+                log('⏰ Время на вопрос вышло!', 'warning');
+            }
+        }, 1000);
+    }
+    
+    function resetTimer() {
+        if (questionTimerInterval) {
+            clearInterval(questionTimerInterval);
+            questionTimerInterval = null;
+        }
+        document.getElementById('timeRemaining').innerText = QUESTION_TIME_LIMIT;
     }
 
     function selectAnswer(answerId, btnElement) {

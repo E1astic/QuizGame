@@ -23,6 +23,8 @@ public interface GameRepository extends JpaRepository<Game, UUID> {
             "LEFT JOIN FETCH q.questions qtq " +
             "LEFT JOIN FETCH qtq.question quest " +
             "LEFT JOIN FETCH quest.answers " +
+            "LEFT JOIN FETCH g.gameTeams gt " +
+            "LEFT JOIN FETCH gt.team " +
             "WHERE g.id = :gameId")
     Optional<Game> findByIdWithQuizAndQuestions(@Param("gameId") UUID gameId);
 }

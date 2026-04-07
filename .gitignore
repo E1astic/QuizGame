@@ -3,37 +3,52 @@
 *.class
 *.o
 *.obj
+*.exe
+*.dll
+*.so
+*.a
 *.out
-build/
-target/
 
 # Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+target/
 .gradle/
-lib/
 
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Editors
+# Editors/IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Environment
+# System/Environment
+.DS_Store
+Thumbs.db
 .env
 .env.local
 *.env.*
 
-# Coverage reports
+# Logs and temp files
+*.log
+*.tmp
+
+# Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Python cache
-__pycache__/
+# Python specific
 *.pyc
-*.pyo
-*.pyd
-.Python
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+
+# Java specific
+*.class
+target/
+.gradle/
 ```

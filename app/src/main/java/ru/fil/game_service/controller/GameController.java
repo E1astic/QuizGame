@@ -46,16 +46,27 @@ public class GameController {
     @MessageMapping("/game/start")
     public ResponseEntity<GameStartResponse> startGame(@Payload UUID gameId) {
         try {
+            log.info("🚀 Запуск игры: {}", gameId);
             gameSessionService.startGame(gameId);
             List<QuestionAnswerDto> questions = gameSessionService.getQuestionsForGame(gameId);
             
+            log.info("📤 Отправка сообщения о старте игры в /topic/game/{}/started", gameId);
             messagingTemplate.convertAndSend("/topic/game/" + gameId + "/started", 
                 new GameStartResponse(gameId, true, "Игра началась"));
             
+            log.info("📤 Отправка {} вопросов в /topic/game/{}/questions", questions != null ? questions.size() : 0, gameId);
             messagingTemplate.convertAndSend("/topic/game/" + gameId + "/questions", questions);
+            
+            // Send initial question transition to show first question
+            QuestionTransitionDto firstTransition = gameSessionService.createQuestionTransition(gameId, null);
+            if (firstTransition != null) {
+                log.info("📤 Отправка первого вопроса в /topic/game/{}/transition", gameId);
+                messagingTemplate.convertAndSend("/topic/game/" + gameId + "/transition", firstTransition);
+            }
             
             return ResponseEntity.ok(new GameStartResponse(gameId, true, "Игра успешно началась"));
         } catch (IllegalStateException e) {
+            log.error("❌ Ошибка при запуске игры: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new GameStartResponse(gameId, false, e.getMessage()));
         }
@@ -63,9 +74,27 @@ public class GameController {
 
     @MessageMapping("/game/answer")
     public ResponseEntity<GameAnswerResponse> submitAnswer(@Payload GameAnswerRequest request) {
+        log.info("📥 Controller: Received answer from team {} for question {} in game {}", 
+                request.teamId(), request.questionId(), request.gameId());
+        
         GameAnswerResponse response = gameSessionService.submitAnswer(request);
         
-        messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer", response);
+        if (response.correct()) {
+            // Отправляем сообщение о правильном ответе всем участникам в общий топик
+            log.info("✅ Team {} answered correctly. Broadcasting to all.", request.teamId());
+            messagingTemplate.convertAndSend("/topic/game/" + request.gameId() + "/answer", response);
+        } else {
+            // Отправляем сообщение о неправильном ответе ТОЛЬКО этой команде через личную очередь
+            log.info("❌ Team {} answered incorrectly. Sending private message.", request.teamId());
+            messagingTemplate.convertAndSendToUser(
+                request.teamId().toString(), 
+                "/queue/answer", 
+                response
+            );
+        }
+        
+        // Transition is already sent by moveToNextQuestion in service via callback
+        // No need to send it again here - the service handles all transition logic
         
         return ResponseEntity.ok(response);
     }
