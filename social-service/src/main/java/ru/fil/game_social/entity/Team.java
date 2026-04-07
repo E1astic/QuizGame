@@ -12,6 +12,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -25,6 +26,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter
+@Setter
 @Builder
 public class Team {
 
@@ -40,13 +42,16 @@ public class Team {
     private Integer maxSize;
 
     @Column(name = "games_played", nullable = false)
-    private Integer gamesPlayed;
+    @Builder.Default
+    private Integer gamesPlayed = 0;
 
     @Column(name = "wins", nullable = false)
-    private Integer wins;
+    @Builder.Default
+    private Integer wins = 0;
 
     @Column(name = "rating", nullable = false)
-    private BigDecimal rating;
+    @Builder.Default
+    private BigDecimal rating = BigDecimal.ZERO;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;

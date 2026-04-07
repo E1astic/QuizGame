@@ -34,13 +34,16 @@ public class Player {
     private String nickname;
 
     @Column(name = "games_played", nullable = false)
-    private Integer gamesPlayed;
+    @Builder.Default
+    private Integer gamesPlayed = 0;
 
     @Column(name = "wins", nullable = false)
-    private Integer wins;
+    @Builder.Default
+    private Integer wins = 0;
 
     @Column(name = "rating", nullable = false)
-    private BigDecimal rating;
+    @Builder.Default
+    private BigDecimal rating = BigDecimal.ZERO;
 
     @OneToMany(mappedBy = "player", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<PlayerToTeam> teams = new HashSet<>();

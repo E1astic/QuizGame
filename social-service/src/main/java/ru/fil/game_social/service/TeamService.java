@@ -15,6 +15,7 @@ import ru.fil.game_social.repository.PlayerTeamRepository;
 import ru.fil.game_social.repository.TeamInvitationRepository;
 import ru.fil.game_social.repository.TeamRepository;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -82,5 +83,37 @@ public class TeamService {
                 .orElseThrow(() -> new RuntimeException("Ошибка при создании связки игрок-команда"));
         teamInvitationRepository.delete(invitation.get());
         return Optional.of(res);
+    }
+
+    /**
+     * Обновляет статистику команды после завершения игры
+     * @param teamId ID команды
+     * @param correctAnswers количество верных ответов в игре
+     * @param totalQuestions общее количество вопросов в квизе
+     * @param isWinner true если команда победила
+     */
+    @Transactional
+    public void updateTeamStats(UUID teamId, int correctAnswers, int totalQuestions, boolean isWinner) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new RuntimeException("Команда не найдена: " + teamId));
+        
+        // Увеличиваем games_played на 1
+        int gamesPlayed = team.getGamesPlayed() + 1;
+        team.setGamesPlayed(gamesPlayed);
+        
+        // Если команда победила, увеличиваем wins на 1
+        if (isWinner) {
+            team.setWins(team.getWins() + 1);
+        }
+        
+        // Вычисляем новый рейтинг: (correctAnswers / totalQuestions + currentRating) / gamesPlayed
+        BigDecimal correctRatio = totalQuestions > 0 
+                ? BigDecimal.valueOf(correctAnswers).divide(BigDecimal.valueOf(totalQuestions), 10, BigDecimal.ROUND_HALF_UP)
+                : BigDecimal.ZERO;
+        BigDecimal newRating = correctRatio.add(team.getRating())
+                .divide(BigDecimal.valueOf(gamesPlayed), 10, BigDecimal.ROUND_HALF_UP);
+        team.setRating(newRating);
+        
+        teamRepository.save(team);
     }
 }

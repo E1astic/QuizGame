@@ -10,6 +10,11 @@ import ru.fil.content_service.entity.Answer;
 import ru.fil.content_service.entity.Question;
 import ru.fil.content_service.entity.Quiz;
 import ru.fil.content_service.entity.QuizToQuestion;
+import ru.fil.game_social.entity.Player;
+import ru.fil.game_social.entity.PlayerToTeam;
+import ru.fil.game_social.entity.Team;
+import ru.fil.game_social.repository.PlayerRepository;
+import ru.fil.game_social.repository.TeamRepository;
 import ru.fil.game_service.dto.GameAnswerRequest;
 import ru.fil.game_service.dto.GameAnswerResponse;
 import ru.fil.game_service.dto.QuestionAnswerDto;
@@ -31,6 +36,8 @@ public class GameSessionService {
     private final GameTeamRepository gameTeamRepository;
     private final ThreadPoolTaskScheduler taskScheduler;
     private final SimpMessagingTemplate messagingTemplate;
+    private final TeamRepository teamRepository;
+    private final PlayerRepository playerRepository;
 
     private final Map<UUID, List<QuestionAnswerDto>> gameQuestionsCache = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, String>> correctAnswersCache = new ConcurrentHashMap<>();
@@ -266,15 +273,106 @@ public class GameSessionService {
         }
     }
 
+    @Transactional
     public void finishGame(UUID gameId) {
         Game game = gameService.getGameById(gameId)
                 .orElseThrow(() -> new IllegalStateException("Игра не найдена"));
+        
+        // Определяем победителя (команда с наибольшим счетом)
+        List<GameTeam> gameTeams = new ArrayList<>(game.getGameTeams());
+        GameTeam winningTeam = null;
+        int maxScore = -1;
+        
+        for (GameTeam gt : gameTeams) {
+            if (gt.getScore() > maxScore) {
+                maxScore = gt.getScore();
+                winningTeam = gt;
+            }
+        }
+        
+        UUID winningTeamId = winningTeam != null ? winningTeam.getTeam().getId() : null;
+        int totalQuestions = game.getQuiz().getQuestions().size();
+        
+        // Обновляем статистику для всех команд и игроков
+        for (GameTeam gt : gameTeams) {
+            Team team = gt.getTeam();
+            boolean isWinner = team.getId().equals(winningTeamId);
+            
+            // Обновляем статистику команды
+            updateTeamStats(team.getId(), gt.getScore(), totalQuestions, isWinner);
+            
+            // Обновляем статистику всех игроков в команде
+            for (PlayerToTeam playerToTeam : team.getPlayers()) {
+                Player player = playerToTeam.getPlayer();
+                updatePlayerStats(player.getId(), gt.getScore(), totalQuestions, isWinner);
+            }
+        }
         
         game.setStatus(GameStatus.FINISHED);
         game.setFinishedAt(java.time.OffsetDateTime.now());
         gameService.saveGame(game);
         
+        log.info("🏆 Игра завершена! Победитель: {}", winningTeamId != null ? winningTeamId : "Нет победителя");
+        
         clearGameSession(gameId);
+    }
+    
+    /**
+     * Обновляет статистику команды
+     */
+    private void updateTeamStats(UUID teamId, int correctAnswers, int totalQuestions, boolean isWinner) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new RuntimeException("Команда не найдена: " + teamId));
+        
+        // Увеличиваем games_played на 1
+        int gamesPlayed = team.getGamesPlayed() + 1;
+        team.setGamesPlayed(gamesPlayed);
+        
+        // Если команда победила, увеличиваем wins на 1
+        if (isWinner) {
+            team.setWins(team.getWins() + 1);
+        }
+        
+        // Вычисляем новый рейтинг: (correctAnswers / totalQuestions + currentRating) / gamesPlayed
+        java.math.BigDecimal correctRatio = totalQuestions > 0 
+                ? java.math.BigDecimal.valueOf(correctAnswers).divide(java.math.BigDecimal.valueOf(totalQuestions), 10, java.math.BigDecimal.ROUND_HALF_UP)
+                : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal newRating = correctRatio.add(team.getRating())
+                .divide(java.math.BigDecimal.valueOf(gamesPlayed), 10, java.math.BigDecimal.ROUND_HALF_UP);
+        team.setRating(newRating);
+        
+        teamRepository.save(team);
+        log.debug("📊 Статистика команды {} обновлена: gamesPlayed={}, wins={}, rating={}", 
+                teamId, gamesPlayed, team.getWins(), newRating);
+    }
+    
+    /**
+     * Обновляет статистику игрока
+     */
+    private void updatePlayerStats(UUID playerId, int correctAnswers, int totalQuestions, boolean isWinner) {
+        Player player = playerRepository.findById(playerId)
+                .orElseThrow(() -> new RuntimeException("Игрок не найден: " + playerId));
+        
+        // Увеличиваем games_played на 1
+        int gamesPlayed = player.getGamesPlayed() + 1;
+        player.setGamesPlayed(gamesPlayed);
+        
+        // Если команда победила, увеличиваем wins на 1
+        if (isWinner) {
+            player.setWins(player.getWins() + 1);
+        }
+        
+        // Вычисляем новый рейтинг: (correctAnswers / totalQuestions + currentRating) / gamesPlayed
+        java.math.BigDecimal correctRatio = totalQuestions > 0 
+                ? java.math.BigDecimal.valueOf(correctAnswers).divide(java.math.BigDecimal.valueOf(totalQuestions), 10, java.math.BigDecimal.ROUND_HALF_UP)
+                : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal newRating = correctRatio.add(player.getRating())
+                .divide(java.math.BigDecimal.valueOf(gamesPlayed), 10, java.math.BigDecimal.ROUND_HALF_UP);
+        player.setRating(newRating);
+        
+        playerRepository.save(player);
+        log.debug("📊 Статистика игрока {} обновлена: gamesPlayed={}, wins={}, rating={}", 
+                playerId, gamesPlayed, player.getWins(), newRating);
     }
 
     public enum AnswerResultType {
