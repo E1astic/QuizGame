@@ -1,6 +1,7 @@
 package ru.fil.game_service.controller;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -17,6 +18,7 @@ import java.util.UUID;
 
 @Controller
 @RequiredArgsConstructor
+@Slf4j
 public class GameController {
 
     private final GameService gameService;
@@ -84,11 +86,23 @@ public class GameController {
     }
 
     @MessageMapping("/game/questions")
-    public ResponseEntity<List<QuestionAnswerDto>> getQuestions(@Payload UUID gameId) {
-        List<QuestionAnswerDto> questions = gameSessionService.getQuestionsForGame(gameId);
-        if (questions == null) {
-            return ResponseEntity.notFound().build();
+    public void getQuestions(@Payload UUID gameId) {
+        try {
+            List<QuestionAnswerDto> questions = gameSessionService.getQuestionsForGame(gameId);
+            if (questions == null || questions.isEmpty()) {
+                log.warn("⚠️ Вопросы не найдены для игры: {}", gameId);
+                return;
+            }
+
+            String destination = "/topic/game/" + gameId + "/questions";
+            log.info("📤 Sending {} questions to {}", questions.size(), destination);
+
+            messagingTemplate.convertAndSend(destination, questions);
+
+        } catch (IllegalArgumentException e) {
+            log.error("❌ Invalid gameId format: {}", gameId, e);
+        } catch (Exception e) {
+            log.error("❌ Unexpected error in getQuestions", e);
         }
-        return ResponseEntity.ok(questions);
     }
 }
