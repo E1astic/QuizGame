@@ -29,6 +29,7 @@ public class GameSessionService {
     private final Map<UUID, Map<UUID, String>> correctAnswersCache = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, UUID>> teamAnswersCache = new ConcurrentHashMap<>(); // gameId -> (teamId -> answerId)
     private final Map<UUID, Set<UUID>> answeredQuestionsCache = new ConcurrentHashMap<>(); // gameId -> set of answered questionIds
+    private final Map<UUID, Integer> currentQuestionIndexCache = new ConcurrentHashMap<>(); // gameId -> current question index
 
     public void loadGameQuestions(UUID gameId) {
         Optional<Game> gameOptional = gameService.getGameById(gameId);
@@ -76,10 +77,7 @@ public class GameSessionService {
         gameQuestionsCache.put(gameId, questionsForClient);
         correctAnswersCache.put(gameId, correctAnswersMap);
         answeredQuestionsCache.put(gameId, ConcurrentHashMap.newKeySet());
-        
-        // Initialize current question index
-        game.setCurrentQuestionIndex(0);
-        gameService.saveGame(game);
+        currentQuestionIndexCache.put(gameId, 0);
     }
 
     public List<QuestionAnswerDto> getQuestionsForGame(UUID gameId) {
@@ -92,10 +90,7 @@ public class GameSessionService {
             return null;
         }
         
-        Game game = gameService.getGameById(gameId)
-                .orElseThrow(() -> new IllegalStateException("Игра не найдена"));
-        
-        Integer currentIndex = game.getCurrentQuestionIndex();
+        Integer currentIndex = currentQuestionIndexCache.get(gameId);
         if (currentIndex == null || currentIndex >= questions.size()) {
             return null;
         }
@@ -118,6 +113,7 @@ public class GameSessionService {
         correctAnswersCache.remove(gameId);
         teamAnswersCache.remove(gameId);
         answeredQuestionsCache.remove(gameId);
+        currentQuestionIndexCache.remove(gameId);
     }
 
     public void startGame(UUID gameId) {
@@ -199,7 +195,7 @@ public class GameSessionService {
         // Move to next question if answer is correct
         QuestionAnswerDto nextQuestion = null;
         if (isCorrect) {
-            Integer currentIndex = game.getCurrentQuestionIndex();
+            Integer currentIndex = currentQuestionIndexCache.get(request.gameId());
             if (currentIndex == null) {
                 currentIndex = 0;
             }
@@ -207,8 +203,7 @@ public class GameSessionService {
             
             List<QuestionAnswerDto> questions = gameQuestionsCache.get(request.gameId());
             if (questions != null && nextIndex < questions.size()) {
-                game.setCurrentQuestionIndex(nextIndex);
-                gameService.saveGame(game);
+                currentQuestionIndexCache.put(request.gameId(), nextIndex);
                 nextQuestion = questions.get(nextIndex);
             } else {
                 // All questions answered - finish game

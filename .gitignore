@@ -4,32 +4,36 @@
 *.o
 *.obj
 *.out
-*.exe
-*.dll
-*.so
-*.a
+build/
+target/
 
 # Dependencies
-target/
 .gradle/
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Environment
-.env
-.env.local
-*.env.*
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+node_modules/
+venv/
+.venv/
+dist/
+coverage/
+htmlcov/
+.coverage
 
 # Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*.tmp
 
-# Build tools
-.mvn/
-mvnw
+# System files
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.env.*
+
+# Logs
+*.log
 ```
