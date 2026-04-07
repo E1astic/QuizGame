@@ -293,7 +293,10 @@ public class GameSessionService {
         }
         
         UUID winningTeamId = winningTeam != null ? winningTeam.getTeam().getId() : null;
-        int totalQuestions = game.getQuiz().getQuestions().size();
+        
+        // Берем количество вопросов из кэша, чтобы избежать LazyInitializationException
+        List<QuestionAnswerDto> questions = gameQuestionsCache.get(gameId);
+        int totalQuestions = questions != null ? questions.size() : 0;
         
         // Обновляем статистику для всех команд и игроков
         for (GameTeam gt : gameTeams) {
