@@ -1,1 +1,39 @@
-Nothing needs to be added to .gitignore since only a single HTML file was modified and no build artifacts, dependencies, or temporary files were detected in the changes.
+```java
+# Compiled Java classes
+*.class
+
+# Maven/Gradle build artifacts
+target/
+build/
+
+# Dependencies
+lib/
+libs/
+
+# IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Project specific build artifacts
+out/
+bin/
+```

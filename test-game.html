@@ -68,6 +68,30 @@
             opacity: 0.6;
             cursor: not-allowed;
         }
+        #timerDisplay {
+            font-size: 2em;
+            font-weight: bold;
+            text-align: center;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            background: #fff3cd;
+            color: #856404;
+        }
+        #timerDisplay.warning {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        #timerDisplay.critical {
+            background: #dc3545;
+            color: white;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
         #submitAnswerBtn {
             background: #28a745;
             color: white;
@@ -130,6 +154,7 @@
     <h2>📝 Текущий вопрос</h2>
     <div id="questionDisplay">
         <div id="questionProgress">Вопрос <span id="currentQuestionNum">-</span> из <span id="totalQuestions">-</span></div>
+        <div id="timerDisplay">⏱️ 30</div>
         <div id="questionText">Загрузка вопроса...</div>
         <div id="answersContainer"></div>
         <button id="submitAnswerBtn" onclick="submitSelectedAnswer()" disabled>Ответить</button>
@@ -151,6 +176,8 @@
     let currentQuestion = null;
     let selectedAnswerId = null;
     let isAnswering = false;
+    let timerSubscription = null;
+    let localTimerInterval = null;
 
     function log(message, type = 'info') {
         const logDiv = document.getElementById('log');
@@ -233,7 +260,8 @@
             { name: 'started', path: `${prefix}/started` },
             { name: 'questions', path: `${prefix}/questions` },
             { name: 'answer', path: `${prefix}/answer` },
-            { name: 'finished', path: `${prefix}/finished` }
+            { name: 'finished', path: `${prefix}/finished` },
+            { name: 'timer', path: `${prefix}/timer` }
         ];
 
         // Добавляем подписку на персональные уведомления команды
