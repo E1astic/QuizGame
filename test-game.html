@@ -14,18 +14,18 @@
         .success { color: green; }
         .error { color: red; }
         .info { color: blue; }
-        
+
         /* Question Display Styles */
-        #questionDisplay { 
-            background: #e8f4f8; 
-            padding: 20px; 
-            margin: 20px 0; 
+        #questionDisplay {
+            background: #e8f4f8;
+            padding: 20px;
+            margin: 20px 0;
             border-radius: 8px;
             border: 2px solid #007bff;
         }
-        #questionText { 
-            font-size: 1.3em; 
-            font-weight: bold; 
+        #questionText {
+            font-size: 1.3em;
+            font-weight: bold;
             margin-bottom: 15px;
             color: #333;
         }
@@ -130,6 +130,7 @@
     <h2>📝 Текущий вопрос</h2>
     <div id="questionDisplay">
         <div id="questionProgress">Вопрос <span id="currentQuestionNum">-</span> из <span id="totalQuestions">-</span></div>
+        <div id="timerDisplay" style="margin-bottom: 10px; font-weight: bold; color: #dc3545;">⏱️ Время: <span id="timeLeft">60</span> сек.</div>
         <div id="questionText">Загрузка вопроса...</div>
         <div id="answersContainer"></div>
         <button id="submitAnswerBtn" onclick="submitSelectedAnswer()" disabled>Ответить</button>
@@ -147,9 +148,13 @@
     let stompClient = null;
     let currentGameId = null;
     let questionsSubscription = null;
+    let responseSubscription = null;
+    let teamAnswerSubscription = null;
     let currentQuestion = null;
     let selectedAnswerId = null;
     let isAnswering = false;
+    let questionTimer = null;
+    let timeLeft = 60;
 
     function log(message, type = 'info') {
         const logDiv = document.getElementById('log');
@@ -175,6 +180,9 @@
 
                 // ✅ Подписка на ответы — ТОЛЬКО ОДИН РАЗ при подключении
                 responseSubscription = stompClient.subscribe('/user/queue/response', handleGameResponse);
+
+                // ✅ Подписка на приватные ответы команды
+                teamAnswerSubscription = stompClient.subscribe('/user/queue/answer-response', handleTeamAnswerResponse);
             },
             function(error) {
                 log('❌ Ошибка: ' + error, 'error');
@@ -208,6 +216,14 @@
         if (responseSubscription) {
             responseSubscription.unsubscribe();
             responseSubscription = null;
+        }
+        if (teamAnswerSubscription) {
+            teamAnswerSubscription.unsubscribe();
+            teamAnswerSubscription = null;
+        }
+        if (questionTimer) {
+            clearInterval(questionTimer);
+            questionTimer = null;
         }
         if (stompClient) {
             stompClient.disconnect();
@@ -388,29 +404,41 @@
             console.error('❌ JSON Parse Error:', e);
             log(`💥 Ошибка парсинга: ${e.message}`, 'error');
             // Выводим первые 100 символов, чтобы понять, что пришло
-            log(`📄 Raw data: ${message.body.substring(0, 150)}...`, 'info');
+            log(`📄 Raw  ${message.body.substring(0, 150)}...`, 'info');
         }
     }
 
-    function handleAnswerResponse(message) {
+    function handleTeamAnswerResponse(message) {
         try {
             const response = JSON.parse(message.body);
-            console.log('📩 Answer response:', response);
+            console.log('📩 Team answer response:', response);
+
+            // Only process if this response is for the current team
+            const currentTeamId = document.getElementById('teamId').value;
+            if (response.teamId && response.teamId !== currentTeamId) {
+                return; // Ignore responses for other teams
+            }
 
             const resultDiv = document.getElementById('answerResult');
-            
+
             if (response.correct) {
                 log(`✅ ${response.message}`, 'success');
                 resultDiv.className = 'success';
                 resultDiv.innerText = response.message;
                 resultDiv.style.display = 'block';
-                
+
                 // Highlight correct answer
                 const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
                 if (selectedBtn) {
                     selectedBtn.classList.add('correct');
                 }
-                
+
+                // Stop timer
+                if (questionTimer) {
+                    clearInterval(questionTimer);
+                    questionTimer = null;
+                }
+
                 // Check if there's a next question
                 if (response.currentQuestion) {
                     log('📝 Переход к следующему вопросу', 'info');
@@ -426,16 +454,37 @@
                 resultDiv.className = 'error';
                 resultDiv.innerText = response.message;
                 resultDiv.style.display = 'block';
-                
+
                 // Highlight wrong answer
                 const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
                 if (selectedBtn) {
                     selectedBtn.classList.add('wrong');
                 }
-                
+
                 // Keep showing current question for retry
                 isAnswering = false;
                 enableAnswerButtons();
+            }
+        } catch (e) {
+            console.error('❌ Parse error:', e);
+            log('💥 Ошибка парсинга ответа: ' + e.message, 'error');
+        }
+    }
+
+    function handleAnswerResponse(message) {
+        try {
+            const response = JSON.parse(message.body);
+            console.log('📩 Public answer response:', response);
+
+            // This is a public message - only show correct answers from other teams
+            if (response.correct) {
+                log(`🎉 ${response.message}`, 'info');
+            }
+
+            // If there's a next question (time's up scenario), display it
+            if (response.currentQuestion && response.message && response.message.includes("Время вышло")) {
+                log('⏰ Время вышло! Переход к следующему вопросу', 'warning');
+                displayQuestion(response.currentQuestion);
             }
         } catch (e) {
             console.error('❌ Parse error:', e);
@@ -447,21 +496,21 @@
         currentQuestion = question;
         selectedAnswerId = null;
         isAnswering = false;
-        
+
         // Hide result from previous answer
         document.getElementById('answerResult').style.display = 'none';
-        
+
         // Update progress
         document.getElementById('currentQuestionNum').innerText = question.questionNumber || '?';
         document.getElementById('totalQuestions').innerText = question.totalQuestions || '?';
-        
+
         // Update question text
         document.getElementById('questionText').innerText = question.questionText;
-        
+
         // Create answer buttons
         const answersContainer = document.getElementById('answersContainer');
         answersContainer.innerHTML = '';
-        
+
         if (question.answers && Array.isArray(question.answers)) {
             question.answers.forEach(answer => {
                 const btn = document.createElement('button');
@@ -472,29 +521,59 @@
                 answersContainer.appendChild(btn);
             });
         }
-        
+
         // Show question section
         document.getElementById('questionSection').style.display = 'block';
-        
+
         // Disable submit button until answer is selected
         document.getElementById('submitAnswerBtn').disabled = true;
-        
+
         log(`📝 Вопрос ${question.questionNumber}/${question.totalQuestions}: ${question.questionText}`, 'info');
+
+        // Start timer for this question
+        startQuestionTimer();
+    }
+
+    function startQuestionTimer() {
+        // Clear any existing timer
+        if (questionTimer) {
+            clearInterval(questionTimer);
+        }
+
+        timeLeft = 60; // Reset to 60 seconds
+        document.getElementById('timeLeft').innerText = timeLeft;
+
+        questionTimer = setInterval(() => {
+            timeLeft--;
+            document.getElementById('timeLeft').innerText = timeLeft;
+
+            // Visual warning when time is running low
+            if (timeLeft <= 10) {
+                document.getElementById('timerDisplay').style.color = '#ff0000';
+            } else {
+                document.getElementById('timerDisplay').style.color = '#dc3545';
+            }
+
+            if (timeLeft <= 0) {
+                clearInterval(questionTimer);
+                log('⏰ Время на вопрос вышло!', 'warning');
+            }
+        }, 1000);
     }
 
     function selectAnswer(answerId, btnElement) {
         if (isAnswering) return;
-        
+
         selectedAnswerId = answerId;
-        
+
         // Remove selected class from all buttons
         document.querySelectorAll('.answerOption').forEach(btn => {
             btn.classList.remove('selected');
         });
-        
+
         // Add selected class to clicked button
         btnElement.classList.add('selected');
-        
+
         // Enable submit button
         document.getElementById('submitAnswerBtn').disabled = false;
     }
@@ -511,28 +590,28 @@
             log('❌ Выберите вариант ответа', 'error');
             return;
         }
-        
+
         if (isAnswering) {
             log('⏳ Ответ уже отправляется...', 'warning');
             return;
         }
-        
+
         const gameId = document.getElementById('gameId').value;
         const teamId = document.getElementById('teamId').value;
-        
+
         if (!gameId || !teamId) {
             log('❌ Game ID или Team ID не указан', 'error');
             return;
         }
-        
+
         isAnswering = true;
-        
+
         // Disable all answer buttons
         document.querySelectorAll('.answerOption').forEach(btn => {
             btn.disabled = true;
         });
         document.getElementById('submitAnswerBtn').disabled = true;
-        
+
         send('/app/game/answer', {
             gameId: gameId,
             questionId: currentQuestion.questionId,
