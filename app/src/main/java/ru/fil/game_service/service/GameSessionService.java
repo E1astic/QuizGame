@@ -220,17 +220,34 @@ public class GameSessionService {
     public void handleTimeUp(UUID gameId) {
         log.warn("⏰ Time's up for game {}!", gameId);
         
-        // Cancel the timer
-        cancelQuestionTimer(gameId);
-        
-        // Move to next question
+        // Get current question before moving to next
         Integer currentIndex = currentQuestionIndexCache.get(gameId);
         if (currentIndex == null) {
             currentIndex = 0;
         }
-        Integer nextIndex = currentIndex + 1;
         
         List<QuestionAnswerDto> questions = gameQuestionsCache.get(gameId);
+        QuestionAnswerDto currentQuestion = null;
+        if (questions != null && currentIndex < questions.size()) {
+            currentQuestion = questions.get(currentIndex);
+        }
+        
+        // Send time up notification with timeLeft=0 BEFORE canceling timer
+        QuestionAnswerDto timeUpQuestion = new QuestionAnswerDto(
+            currentQuestion != null ? currentQuestion.questionId() : null,
+            currentQuestion != null ? currentQuestion.questionText() : "Время вышло!",
+            currentQuestion != null ? currentQuestion.answers() : java.util.Collections.emptyList(),
+            currentQuestion != null ? currentQuestion.questionNumber() : 0,
+            currentQuestion != null ? currentQuestion.totalQuestions() : 0,
+            0 // timeLeft = 0
+        );
+        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/timer", timeUpQuestion);
+        
+        // Cancel the timer
+        cancelQuestionTimer(gameId);
+        
+        // Move to next question
+        Integer nextIndex = currentIndex + 1;
         QuestionAnswerDto nextQuestion = null;
         boolean shouldFinishGame = false;
         
@@ -242,25 +259,6 @@ public class GameSessionService {
         } else {
             // All questions answered - finish game
             shouldFinishGame = true;
-        }
-        
-        // Create response to notify clients about time up
-        GameAnswerResponse response = new GameAnswerResponse(
-            gameId,
-            null,
-            null,
-            false,
-            "Время вышло!",
-            nextQuestion,
-            AnswerResultType.INCORRECT
-        );
-        
-        // Send time up notification to all clients via answer topic
-        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/answer", response);
-        
-        // Also send the next question via timer topic so clients can update display
-        if (nextQuestion != null) {
-            messagingTemplate.convertAndSend("/topic/game/" + gameId + "/timer", nextQuestion);
         }
         
         if (shouldFinishGame) {

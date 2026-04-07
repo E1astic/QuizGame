@@ -605,6 +605,8 @@
         send('/app/game/finish', gameId);
     }
 
+    let timerTimeUpHandled = false; // Flag to track if we already handled time up for current question
+
     function handleTimerUpdate(message) {
         try {
             const data = JSON.parse(message.body);
@@ -629,29 +631,32 @@
             if (timeLeft <= 0) {
                 log('⏰ Время вышло!', 'error');
                 
-                // Reset timer display to show initial time for next question
-                timerDisplay.innerText = '⏱️ 30';
-                timerDisplay.classList.remove('warning', 'critical');
+                // Show time up message
+                const resultDiv = document.getElementById('answerResult');
+                resultDiv.className = 'error';
+                resultDiv.innerText = 'Время вышло!';
+                resultDiv.style.display = 'block';
                 
                 // Disable answer buttons during transition
                 isAnswering = true;
                 disableAnswerButtons();
                 
-                // If there's a next question in the data, display it
-                // Check for next question using the fields from QuestionAnswerDto
-                if (data.questionText && data.questionNumber) {
-                    setTimeout(() => {
-                        displayQuestion(data);
-                        isAnswering = false;
-                        enableAnswerButtons();
-                    }, 1500);
-                } else {
-                    // No more questions - game finished
-                    log('🏆 Игра завершена!', 'success');
-                    setTimeout(() => {
-                        document.getElementById('questionSection').style.display = 'none';
-                    }, 1500);
-                }
+                // Mark that we've handled time up for this question
+                timerTimeUpHandled = true;
+            } else if (timerTimeUpHandled && timeLeft === 30) {
+                // This is a new question after time was up
+                // Reset flag and display the new question
+                timerTimeUpHandled = false;
+                
+                // Hide result message
+                document.getElementById('answerResult').style.display = 'none';
+                
+                // Display the new question
+                displayQuestion(data);
+                isAnswering = false;
+                enableAnswerButtons();
+                
+                log(`📝 Вопрос ${data.questionNumber}/${data.totalQuestions}: ${data.questionText}`, 'info');
             }
         } catch (e) {
             console.error('❌ Timer parse error:', e);
