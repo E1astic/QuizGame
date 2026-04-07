@@ -146,6 +146,7 @@
 <script>
     let stompClient = null;
     let currentGameId = null;
+    let currentTeamId = null;
     let questionsSubscription = null;
     let currentQuestion = null;
     let selectedAnswerId = null;
@@ -225,6 +226,8 @@
         }
 
         const prefix = `/topic/game/${currentGameId}`;
+        // Используем currentTeamId вместо получения из input
+        const teamId = currentTeamId || document.getElementById('teamId').value;
         const topics = [
             { name: 'teams', path: `${prefix}/teams` },
             { name: 'started', path: `${prefix}/started` },
@@ -232,6 +235,11 @@
             { name: 'answer', path: `${prefix}/answer` },
             { name: 'finished', path: `${prefix}/finished` }
         ];
+
+        // Добавляем подписку на персональные уведомления команды
+        if (teamId) {
+            topics.push({ name: 'team', path: `${prefix}/team/${teamId}` });
+        }
 
         topics.forEach(({name, path}) => {
             // Отписываемся от старой, если есть
@@ -249,6 +257,10 @@
                         handleQuestions(message);
                         break;
                     case 'answer':
+                        handleAnswerResponse(message);
+                        break;
+                    case 'team':
+                        // Персональные уведомления команды (неправильный ответ, уже ответил)
                         handleAnswerResponse(message);
                         break;
                     case 'teams':
@@ -312,9 +324,11 @@
             return;
         }
 
-        // 🔑 Синхронизируем currentGameId перед отправкой запроса
+        // 🔑 Синхронизируем currentGameId и currentTeamId перед отправкой запроса
         currentGameId = gameId;
+        currentTeamId = teamId;
         log(`🔄 Game ID установлен: ${currentGameId}`, 'info');
+        log(`🔄 Team ID установлен: ${currentTeamId}`, 'info');
 
         // Подписываемся на топики игры если еще не подписаны
         if (stompClient && stompClient.connected) {
