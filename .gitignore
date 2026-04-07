@@ -9,31 +9,31 @@ target/
 
 # Dependencies
 .gradle/
-.mypy_cache/
-.pytest_cache/
-__pycache__/
-node_modules/
-venv/
-.venv/
-dist/
-coverage/
-htmlcov/
-.coverage
+lib/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
 
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*.tmp
 
-# System files
-.DS_Store
-Thumbs.db
+# Environment
 .env
 .env.local
 *.env.*
 
-# Logs
-*.log
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 ```

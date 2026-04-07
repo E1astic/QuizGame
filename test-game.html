@@ -312,6 +312,15 @@
             return;
         }
 
+        // 🔑 Синхронизируем currentGameId перед отправкой запроса
+        currentGameId = gameId;
+        log(`🔄 Game ID установлен: ${currentGameId}`, 'info');
+
+        // Подписываемся на топики игры если еще не подписаны
+        if (stompClient && stompClient.connected) {
+            subscribeToGameTopics();
+        }
+
         send('/app/game/join', { gameId: gameId, teamId: teamId });
     }
 

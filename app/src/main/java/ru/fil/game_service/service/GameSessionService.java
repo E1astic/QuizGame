@@ -194,6 +194,8 @@ public class GameSessionService {
 
         // Move to next question if answer is correct
         QuestionAnswerDto nextQuestion = null;
+        boolean shouldFinishGame = false;
+        
         if (isCorrect) {
             Integer currentIndex = currentQuestionIndexCache.get(request.gameId());
             if (currentIndex == null) {
@@ -206,15 +208,15 @@ public class GameSessionService {
                 currentQuestionIndexCache.put(request.gameId(), nextIndex);
                 nextQuestion = questions.get(nextIndex);
             } else {
-                // All questions answered - finish game
-                finishGame(request.gameId());
+                // All questions answered - mark for finishing game
+                shouldFinishGame = true;
             }
         } else {
             // Return current question again if answer was wrong
             nextQuestion = getCurrentQuestion(request.gameId());
         }
 
-        return new GameAnswerResponse(
+        GameAnswerResponse response = new GameAnswerResponse(
                 request.gameId(), 
                 request.questionId(), 
                 request.teamId(), 
@@ -222,5 +224,11 @@ public class GameSessionService {
                 isCorrect ? "Правильный ответ" : "Неправильный ответ",
                 nextQuestion
         );
+        
+        if (shouldFinishGame) {
+            finishGame(request.gameId());
+        }
+        
+        return response;
     }
 }
