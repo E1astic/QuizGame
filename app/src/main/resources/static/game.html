@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .question-box {
+            background-color: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+        .question-text {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+        }
+        .answers {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .answer-btn {
+            background-color: #2196F3;
+            text-align: left;
+        }
+        .answer-btn:hover {
+            background-color: #1976D2;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px;
+            border-bottom: 1px solid #eee;
+        }
+        .scores {
+            margin-top: 20px;
+        }
+        .score-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background-color: #f8f9fa;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 Quiz Game</h1>
+        
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="status disconnected">
+            ❌ Not connected
+        </div>
+
+        <!-- Connection Form -->
+        <div id="connectionForm" class="form-group">
+            <h2>Подключение к игре</h2>
+            <div class="form-group">
+                <label for="gameId">ID игры:</label>
+                <input type="text" id="gameId" placeholder="Введите UUID игры">
+            </div>
+            <div class="form-group">
+                <label for="teamId">ID команды:</label>
+                <input type="text" id="teamId" placeholder="Введите UUID команды">
+            </div>
+            <button onclick="connect()">Подключиться</button>
+        </div>
+
+        <!-- Game Controls -->
+        <div id="gameControls" class="hidden">
+            <h2>Управление игрой</h2>
+            <button onclick="registerTeam()">Зарегистрировать команду</button>
+            <button onclick="startGame()" id="startBtn">Начать игру</button>
+        </div>
+
+        <!-- Question Display -->
+        <div id="questionBox" class="question-box">
+            <h2 id="questionNumber">Вопрос 1 из 5</h2>
+            <p id="questionText" class="question-text"></p>
+            <div id="answers" class="answers"></div>
+        </div>
+
+        <!-- Scores -->
+        <div id="scoresBox" class="scores hidden">
+            <h2>Счета команд</h2>
+            <div id="scoresList"></div>
+        </div>
+
+        <!-- Log -->
+        <div class="log" id="log"></div>
+    </div>
+
+    <!-- STOMP and SockJS libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+
+    <script>
+        let stompClient = null;
+        let currentGameId = null;
+        let currentTeamId = null;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusDiv = document.getElementById('connectionStatus');
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = '✅ Подключено';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '❌ Не подключено';
+            }
+        }
+
+        function connect() {
+            currentGameId = document.getElementById('gameId').value.trim();
+            currentTeamId = document.getElementById('teamId').value.trim();
+
+            if (!currentGameId || !currentTeamId) {
+                alert('Пожалуйста, введите ID игры и ID команды');
+                return;
+            }
+
+            // Connect to WebSocket
+            const socket = new SockJS('/ws-game');
+            stompClient = Stomp.over(socket);
+
+            stompClient.connect({}, function(frame) {
+                log('Успешное подключение к WebSocket: ' + frame);
+                updateConnectionStatus(true);
+                document.getElementById('connectionForm').classList.add('hidden');
+                document.getElementById('gameControls').classList.remove('hidden');
+
+                // Subscribe to game topics
+                subscribeToGame(currentGameId);
+            }, function(error) {
+                log('Ошибка подключения: ' + error);
+                updateConnectionStatus(false);
+            });
+        }
+
+        function subscribeToGame(gameId) {
+            // Subscribe to question updates
+            stompClient.subscribe('/topic/game/' + gameId + '/question', function(message) {
+                log('Получен вопрос: ' + message.body);
+                showQuestion(JSON.parse(message.body));
+            });
+
+            // Subscribe to wrong answer notifications
+            stompClient.subscribe('/topic/game/' + gameId + '/wrong-answer', function(message) {
+                log('Неправильный ответ: ' + message.body);
+                const data = JSON.parse(message.body);
+                alert('Неправильный ответ! Попробуйте другой вариант.');
+            });
+
+            // Subscribe to game finished event
+            stompClient.subscribe('/topic/game/' + gameId + '/finished', function(message) {
+                log('Игра завершена: ' + message.body);
+                const data = JSON.parse(message.body);
+                showFinalResults(data);
+            });
+
+            log('Подписка на обновления игры: ' + gameId);
+        }
+
+        function registerTeam() {
+            if (!stompClient || !stompClient.connected) {
+                alert('Сначала подключитесь к игре');
+                return;
+            }
+
+            const request = {
+                gameId: currentGameId,
+                teamId: currentTeamId
+            };
+
+            stompClient.send('/app/game/register', {}, JSON.stringify(request));
+            log('Отправлен запрос на регистрацию команды');
+            alert('Команда зарегистрирована!');
+        }
+
+        function startGame() {
+            if (!stompClient || !stompClient.connected) {
+                alert('Сначала подключитесь к игре');
+                return;
+            }
+
+            const request = {
+                gameId: currentGameId
+            };
+
+            stompClient.send('/app/game/start', {}, JSON.stringify(request));
+            log('Отправлен запрос на старт игры');
+            document.getElementById('startBtn').disabled = true;
+        }
+
+        function showQuestion(questionData) {
+            const questionBox = document.getElementById('questionBox');
+            const questionNumber = document.getElementById('questionNumber');
+            const questionText = document.getElementById('questionText');
+            const answersDiv = document.getElementById('answers');
+
+            questionNumber.textContent = `Вопрос ${questionData.questionNumber} из ${questionData.totalQuestions}`;
+            questionText.textContent = questionData.questionText;
+
+            answersDiv.innerHTML = '';
+            questionData.answers.forEach(answer => {
+                const btn = document.createElement('button');
+                btn.className = 'answer-btn';
+                btn.textContent = answer.answerText;
+                btn.onclick = () => submitAnswer(questionData.questionId, answer.answerId);
+                answersDiv.appendChild(btn);
+            });
+
+            questionBox.style.display = 'block';
+            document.getElementById('scoresBox').classList.add('hidden');
+        }
+
+        function submitAnswer(questionId, answerId) {
+            if (!stompClient || !stompClient.connected) {
+                alert('Нет подключения к серверу');
+                return;
+            }
+
+            const request = {
+                gameId: currentGameId,
+                teamId: currentTeamId,
+                questionId: questionId,
+                answerId: answerId
+            };
+
+            stompClient.send('/app/game/answer', {}, JSON.stringify(request));
+            log(`Отправлен ответ: команда=${currentTeamId}, вопрос=${questionId}, ответ=${answerId}`);
+        }
+
+        function showFinalResults(data) {
+            const scoresBox = document.getElementById('scoresBox');
+            const scoresList = document.getElementById('scoresList');
+            const questionBox = document.getElementById('questionBox');
+
+            questionBox.style.display = 'none';
+            scoresBox.classList.remove('hidden');
+
+            scoresList.innerHTML = '<h3>🏆 Результаты игры</h3>';
+            
+            const scores = data.scores || {};
+            Object.entries(scores).forEach(([teamId, score]) => {
+                const item = document.createElement('div');
+                item.className = 'score-item';
+                item.innerHTML = `<span>Команда ${teamId.substring(0, 8)}...</span><strong>${score} очков</strong>`;
+                scoresList.appendChild(item);
+            });
+
+            document.getElementById('startBtn').disabled = false;
+        }
+
+        function fetchScores() {
+            if (!currentGameId) return;
+
+            fetch(`/api/game/${currentGameId}/scores`)
+                .then(response => response.json())
+                .then(data => {
+                    log('Текущие счета: ' + JSON.stringify(data));
+                })
+                .catch(error => log('Ошибка получения счетов: ' + error));
+        }
+    </script>
+</body>
+</html>
