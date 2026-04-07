@@ -2,6 +2,7 @@ package ru.fil.game_service.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.fil.content_service.entity.Answer;
@@ -31,6 +32,7 @@ public class GameSessionService {
 
     private final GameService gameService;
     private final GameTeamRepository gameTeamRepository;
+    private final SimpMessagingTemplate messagingTemplate;
 
     private final Map<UUID, List<QuestionAnswerDto>> gameQuestionsCache = new ConcurrentHashMap<>();
     private final Map<UUID, Map<UUID, String>> correctAnswersCache = new ConcurrentHashMap<>();
@@ -42,13 +44,6 @@ public class GameSessionService {
     
     private static final int QUESTION_TIME_LIMIT_SECONDS = 30;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(5);
-    
-    // Callback for sending transition messages - will be set by controller
-    private Runnable questionTransitionCallback;
-    
-    public void setQuestionTransitionCallback(Runnable callback) {
-        this.questionTransitionCallback = callback;
-    }
 
     public void loadGameQuestions(UUID gameId) {
         Optional<Game> gameOptional = gameService.getGameById(gameId);
@@ -205,14 +200,14 @@ public class GameSessionService {
         
         if (shouldFinishGame) {
             finishGame(gameId);
+            return; // Don't send transition if game is finished
         }
         
-        // Notify about question transition (this will be handled by controller via callback)
-        if (questionTransitionCallback != null) {
-            log.info("🔔 Calling callback to notify about transition");
-            questionTransitionCallback.run();
-        } else {
-            log.info("⚠️ Callback not set, transition notification not sent");
+        // Send transition message to all participants
+        QuestionTransitionDto transition = createQuestionTransition(gameId, correctTeamId);
+        if (transition != null) {
+            log.info("📢 Sending transition to /topic/game/{}/transition", gameId);
+            messagingTemplate.convertAndSend("/topic/game/" + gameId + "/transition", transition);
         }
     }
     

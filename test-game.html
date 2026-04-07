@@ -178,7 +178,7 @@
                 document.getElementById('connectionStatus').innerText = 'Status: Connected';
 
                 // ✅ Subscribe to answers - ONLY ONCE on connect
-                responseSubscription = stompClient.subscribe('/user/queue/response', handleGameResponse);
+                responseSubscription = stompClient.subscribe('/user/queue/answer', handleAnswerResponse);
             },
             function(error) {
                 log('❌ Error: ' + error, 'error');
@@ -187,23 +187,47 @@
         );
     }
 
-    // 🔍 Вынесенный обработчик — чистый и переиспользуемый
-    function handleGameResponse(message) {
+    // 🔍 Handler for answer responses from server
+    function handleAnswerResponse(message) {
         try {
             const response = JSON.parse(message.body);
-            console.log('📩 Game response:', response);
+            console.log('📩 Answer response:', response);
 
-            if (response.gameId) {
-                currentGameId = response.gameId;
-                document.getElementById('gameId').value = response.gameId;
-                log(`🎮 Game created: ${response.gameId}`, 'success');
-
-                // ✅ Now safe: currentGameId is set
-                subscribeToGameTopics();
+            const resultDiv = document.getElementById('answerResult');
+            
+            if (response.correct) {
+                log(`✅ ${response.message}`, 'success');
+                resultDiv.className = 'success';
+                resultDiv.innerText = response.message;
+                resultDiv.style.display = 'block';
+                
+                // Highlight correct answer
+                const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
+                if (selectedBtn) {
+                    selectedBtn.classList.add('correct');
+                }
+                
+                // Transition will be handled by handleTransition message
+                log('📝 Waiting for transition to next question', 'info');
+            } else {
+                log(`❌ ${response.message}`, 'error');
+                resultDiv.className = 'error';
+                resultDiv.innerText = response.message;
+                resultDiv.style.display = 'block';
+                
+                // Highlight wrong answer
+                const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
+                if (selectedBtn) {
+                    selectedBtn.classList.add('wrong');
+                }
+                
+                // Keep showing current question for retry
+                isAnswering = false;
+                enableAnswerButtons();
             }
-        } catch(e) {
-            console.error('❌ Parse error:', e);
-            log('💥 Response parse error: ' + e.message, 'error');
+        } catch (e) {
+            console.error('❌ Parse error in handleAnswerResponse:', e);
+            log('💥 Answer response parse error: ' + e.message, 'error');
         }
     }
 

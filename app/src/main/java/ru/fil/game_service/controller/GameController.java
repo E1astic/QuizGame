@@ -87,25 +87,8 @@ public class GameController {
         );
         log.info("📤 Controller: Sent answer response to team /queue/answer");
         
-        // Always check and send transition if needed (correct answer, all teams answered, or timeout)
-        QuestionTransitionDto transition = gameSessionService.createQuestionTransition(
-            request.gameId(), 
-            response.correct() ? request.teamId() : null
-        );
-        
-        if (transition != null && transition.questionNumber() != null) {
-            String message = transition.correctTeamName() != null 
-                ? "Team \"" + transition.correctTeamName() + "\" answered correctly! Moving to question " + transition.questionNumber() 
-                : "Moving to question " + transition.questionNumber();
-            
-            log.info("📢 Controller: Sending transition message: {}", message);
-            messagingTemplate.convertAndSend(
-                "/topic/game/" + request.gameId() + "/transition",
-                transition
-            );
-        } else {
-            log.info("ℹ️ Controller: No transition needed yet (not all teams answered or game finished)");
-        }
+        // Transition is already sent by moveToNextQuestion in service via callback
+        // No need to send it again here - the service handles all transition logic
         
         return ResponseEntity.ok(response);
     }
