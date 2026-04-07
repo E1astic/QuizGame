@@ -275,7 +275,7 @@ public class GameSessionService {
 
     @Transactional
     public void finishGame(UUID gameId) {
-        Game game = gameService.getGameById(gameId)
+        Game game = gameService.getGameWithTeamsAndPlayers(gameId)
                 .orElseThrow(() -> new IllegalStateException("Игра не найдена"));
         
         // Определяем победителя (команда с наибольшим счетом)

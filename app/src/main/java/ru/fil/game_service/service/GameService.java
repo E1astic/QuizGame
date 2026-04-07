@@ -48,6 +48,10 @@ public class GameService {
         return gameRepository.findByIdWithQuizAndQuestions(gameId);
     }
 
+    public Optional<Game> getGameWithTeamsAndPlayers(UUID gameId) {
+        return gameRepository.findByIdWithTeamsAndPlayers(gameId);
+    }
+
     public Game saveGame(Game game) {
         return gameRepository.save(game);
     }

@@ -25,4 +25,12 @@ public interface GameRepository extends JpaRepository<Game, UUID> {
             "LEFT JOIN FETCH quest.answers " +
             "WHERE g.id = :gameId")
     Optional<Game> findByIdWithQuizAndQuestions(@Param("gameId") UUID gameId);
+
+    @Query("SELECT DISTINCT g FROM Game g " +
+            "LEFT JOIN FETCH g.gameTeams gt " +
+            "LEFT JOIN FETCH gt.team t " +
+            "LEFT JOIN FETCH t.players pt " +
+            "LEFT JOIN FETCH pt.player p " +
+            "WHERE g.id = :gameId")
+    Optional<Game> findByIdWithTeamsAndPlayers(@Param("gameId") UUID gameId);
 }
