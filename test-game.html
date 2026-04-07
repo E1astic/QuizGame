@@ -187,49 +187,7 @@
         );
     }
 
-    // 🔍 Handler for answer responses from server
-    function handleAnswerResponse(message) {
-        try {
-            const response = JSON.parse(message.body);
-            console.log('📩 Answer response:', response);
-
-            const resultDiv = document.getElementById('answerResult');
-            
-            if (response.correct) {
-                log(`✅ ${response.message}`, 'success');
-                resultDiv.className = 'success';
-                resultDiv.innerText = response.message;
-                resultDiv.style.display = 'block';
-                
-                // Highlight correct answer
-                const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
-                if (selectedBtn) {
-                    selectedBtn.classList.add('correct');
-                }
-                
-                // Transition will be handled by handleTransition message
-                log('📝 Waiting for transition to next question', 'info');
-            } else {
-                log(`❌ ${response.message}`, 'error');
-                resultDiv.className = 'error';
-                resultDiv.innerText = response.message;
-                resultDiv.style.display = 'block';
-                
-                // Highlight wrong answer
-                const selectedBtn = document.querySelector(`button[data-answer-id="${selectedAnswerId}"]`);
-                if (selectedBtn) {
-                    selectedBtn.classList.add('wrong');
-                }
-                
-                // Keep showing current question for retry
-                isAnswering = false;
-                enableAnswerButtons();
-            }
-        } catch (e) {
-            console.error('❌ Parse error in handleAnswerResponse:', e);
-            log('💥 Answer response parse error: ' + e.message, 'error');
-        }
-    }
+    // 🔍 Handler for answer responses from server - REMOVED, using the one defined later
 
     function disconnect() {
         // ✅ Unsubscribe from all subscriptions

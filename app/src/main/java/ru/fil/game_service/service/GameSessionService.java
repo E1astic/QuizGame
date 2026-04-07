@@ -326,6 +326,22 @@ public class GameSessionService {
             // Correct answer - move to next question and announce which team was correct
             moveToNextQuestion(request.gameId(), request.teamId());
         } else {
+            // Send wrong answer message to the team
+            log.info("❌ Wrong answer from team {}. Sending notification.", request.teamId());
+            GameAnswerResponse wrongResponse = new GameAnswerResponse(
+                    request.gameId(), 
+                    request.questionId(), 
+                    request.teamId(), 
+                    false, 
+                    "Wrong answer",
+                    null
+            );
+            messagingTemplate.convertAndSendToUser(
+                    request.teamId().toString(), 
+                    "/queue/answer", 
+                    wrongResponse
+            );
+            
             // Check if all teams have answered incorrectly - if so, move to next question
             int totalTeams = game.getGameTeams().size();
             log.info("❌ Wrong answer. Teams answered: {} out of {}", answeredTeams.size(), totalTeams);
