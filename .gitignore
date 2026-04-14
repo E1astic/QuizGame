@@ -1,1 +1,30 @@
-Nothing should be ignored based on the provided file changes. The only modified file is a Java source file (`GameSessionService.java`), which is core source code and should not be ignored. There are no build artifacts, dependency directories, temporary files, or other items that warrant being added to .gitignore.
+```
+# Word processing documents
+*.docx
+
+# Python compiled files
+*.pyc
+__pycache__/
+
+# Virtual environments
+venv/
+.venv/
+.env
+.env.local
+*.env.*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Logs
+*.log
+
+# Build and distribution
+dist/
+build/
+*.out
+```
