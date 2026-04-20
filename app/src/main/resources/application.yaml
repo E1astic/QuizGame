@@ -18,3 +18,6 @@ auth:
   jwt:
     secret: T,Rn[}@24!SVn]3F)i<D]IJT;6:t}rTz$6i3&p41B=M
     lifetime: 1h
+
+websocket:
+  allowed-origins: "*"

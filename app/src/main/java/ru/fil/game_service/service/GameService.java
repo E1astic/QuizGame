@@ -45,7 +45,7 @@ public class GameService {
     }
 
     public Optional<Game> getGameById(UUID gameId) {
-        return gameRepository.findById(gameId);
+        return gameRepository.findByIdWithQuizAndQuestions(gameId);
     }
 
     public Game saveGame(Game game) {

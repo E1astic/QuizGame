@@ -151,3 +151,25 @@ create table if not exists quizzes_to_questions
 
     primary key (quiz_id, question_id)
 );
+
+
+-- ИГРЫ
+create table if not exists games
+(
+    id          uuid primary key default gen_random_uuid(),
+    quiz_id     uuid        not null references quizzes(id) on delete cascade,
+    status      varchar(50) not null check (status in ('WAITING', 'IN_PROGRESS', 'FINISHED')),
+    started_at  timestamptz,
+    finished_at timestamptz
+);
+
+
+-- КОМАНДЫ В ИГРЕ
+create table if not exists games_to_teams
+(
+    game_id uuid not null references games(id) on delete cascade,
+    team_id uuid not null references teams(id) on delete cascade,
+    score   int  not null default 0,
+
+    primary key (game_id, team_id)
+);

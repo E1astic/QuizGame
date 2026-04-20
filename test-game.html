@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Тестирование игры-викторины</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+        button { margin: 5px; padding: 10px 20px; cursor: pointer; }
+        input, select { margin: 5px; padding: 8px; }
+        #log { background: #f4f4f4; padding: 10px; height: 400px; overflow-y: scroll; font-family: monospace; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+<h1>Тестирование игры-викторины</h1>
+
+<div class="section">
+    <h2>1. Подключение к WebSocket</h2>
+    <button onclick="connect()">Подключиться</button>
+    <button onclick="disconnect()">Отключиться</button>
+    <span id="connectionStatus">Статус: Не подключено</span>
+</div>
+
+<div class="section">
+    <h2>2. Создание игры</h2>
+    <input type="text" id="quizId" placeholder="Quiz ID (UUID)" value="00000000-0000-0000-0000-000000000001">
+    <button onclick="createGame()">Создать игру</button>
+</div>
+
+<div class="section">
+    <h2>3. Присоединение команды</h2>
+    <input type="text" id="gameId" placeholder="Game ID (UUID)">
+    <input type="text" id="teamId" placeholder="Team ID (UUID)" value="00000000-0000-0000-0000-000000000001">
+    <button onclick="joinGame()">Присоединиться</button>
+</div>
+
+<div class="section">
+    <h2>4. Управление игрой</h2>
+    <button onclick="startGame()">Начать игру</button>
+    <button onclick="getQuestions()">Получить вопросы</button>
+    <button onclick="finishGame()">Завершить игру</button>
+</div>
+
+<div class="section">
+    <h2>5. Отправка ответа</h2>
+    <input type="text" id="questionId" placeholder="Question ID (UUID)">
+    <input type="text" id="answerId" placeholder="Answer ID (UUID)">
+    <button onclick="submitAnswer()">Отправить ответ</button>
+</div>
+
+<div class="section">
+    <h2>Лог событий</h2>
+    <button onclick="clearLog()">Очистить лог</button>
+    <div id="log"></div>
+</div>
+
+<script>
+    let stompClient = null;
+    let currentGameId = null;
+    let questionsSubscription = null;
+
+    function log(message, type = 'info') {
+        const logDiv = document.getElementById('log');
+        const timestamp = new Date().toLocaleTimeString();
+        const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+        logDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function clearLog() {
+        document.getElementById('log').innerHTML = '';
+    }
+
+    function connect() {
+        const socket = new SockJS('http://localhost:8040/quizgame/ws-game');
+        stompClient = Stomp.over(socket);
+        stompClient.debug = null;
+
+        stompClient.connect({ host: '/' },
+            function(frame) {
+                log('✅ Подключено', 'success');
+                document.getElementById('connectionStatus').innerText = 'Статус: Подключено';
+
+                // ✅ Подписка на ответы — ТОЛЬКО ОДИН РАЗ при подключении
+                responseSubscription = stompClient.subscribe('/user/queue/response', handleGameResponse);
+            },
+            function(error) {
+                log('❌ Ошибка: ' + error, 'error');
+                console.error('STOMP error:', error);
+            }
+        );
+    }
+
+    // 🔍 Вынесенный обработчик — чистый и переиспользуемый
+    function handleGameResponse(message) {
+        try {
+            const response = JSON.parse(message.body);
+            console.log('📩 Game response:', response);
+
+            if (response.gameId) {
+                currentGameId = response.gameId;
+                document.getElementById('gameId').value = response.gameId;
+                log(`🎮 Игра создана: ${response.gameId}`, 'success');
+
+                // ✅ Теперь безопасно: currentGameId задан
+                subscribeToGameTopics();
+            }
+        } catch(e) {
+            console.error('❌ Parse error:', e);
+            log('💥 Ошибка парсинга ответа: ' + e.message, 'error');
+        }
+    }
+
+    function disconnect() {
+        // ✅ Отписываемся от всех подписок
+        if (responseSubscription) {
+            responseSubscription.unsubscribe();
+            responseSubscription = null;
+        }
+        if (stompClient) {
+            stompClient.disconnect();
+            stompClient = null;
+            log('🔌 Отключено', 'info');
+        }
+    }
+
+    let topicSubscriptions = {}; // { topicName: subscription }
+
+    function subscribeToGameTopics() {
+        if (!currentGameId) {
+            log('⚠️ currentGameId не задан, подписка отложена', 'warning');
+            return;
+        }
+
+        const prefix = `/topic/game/${currentGameId}`;
+        const topics = [
+            { name: 'teams', path: `${prefix}/teams` },
+            { name: 'started', path: `${prefix}/started` },
+            { name: 'questions', path: `${prefix}/questions` },
+            { name: 'answer', path: `${prefix}/answer` },
+            { name: 'finished', path: `${prefix}/finished` }
+        ];
+
+        topics.forEach(({name, path}) => {
+            // Отписываемся от старой, если есть
+            if (topicSubscriptions[name]) {
+                topicSubscriptions[name].unsubscribe();
+                console.log(`🔄 Old subscription unsubscribed: ${name}`);
+            }
+
+            // Создаём новую
+            topicSubscriptions[name] = stompClient.subscribe(path, function(message) {
+                console.log(`📩 [${name}] Raw:`, message.body.substring(0, 200));
+
+                switch(name) {
+                    case 'questions':
+                        handleQuestions(message); // ← Ваша функция с парсингом
+                        break;
+                    case 'teams':
+                    case 'started':
+                    case 'answer':
+                    case 'finished':
+                        log(`📨 ${name}: ${message.body}`, 'info');
+                        break;
+                }
+            });
+            console.log(`✅ Subscribed: ${path}`);
+        });
+
+        log(`🔗 Подписан на топики игры ${currentGameId}`, 'success');
+    }
+
+    // ✅ Очистка при смене игры или отключении
+    function unsubscribeFromGameTopics() {
+        Object.values(topicSubscriptions).forEach(sub => {
+            if (sub) sub.unsubscribe();
+        });
+        topicSubscriptions = {};
+        log('🧹 Подписки на топики игры очищены', 'info');
+    }
+
+    function send(destination, body) {
+        if (stompClient && stompClient.connected) {
+            log(`Отправка в ${destination}: ${JSON.stringify(body)}`, 'info');
+            stompClient.send(destination, {}, JSON.stringify(body));
+        } else {
+            log('Не подключено к WebSocket', 'error');
+        }
+    }
+
+    function createGame() {
+        const quizId = document.getElementById('quizId').value;
+        if (!quizId) {
+            log('❌ Укажите Quiz ID', 'error');
+            return;
+        }
+        if (!stompClient || !stompClient.connected) {
+            log('❌ Нет WebSocket соединения', 'error');
+            return;
+        }
+
+        // Если создаём новую игру — очищаем старые подписки
+        if (currentGameId) {
+            unsubscribeFromGameTopics();
+        }
+
+        log(`📤 Создание игры для quiz: ${quizId}`, 'info');
+        send('/app/game/create', { quizId: quizId });
+        // ✅ Подписка на ответ уже есть в connect(), ничего добавлять не нужно
+    }
+
+    function joinGame() {
+        const gameId = document.getElementById('gameId').value;
+        const teamId = document.getElementById('teamId').value;
+
+        if (!gameId || !teamId) {
+            log('Укажите Game ID и Team ID', 'error');
+            return;
+        }
+
+        send('/app/game/join', { gameId: gameId, teamId: teamId });
+    }
+
+    function startGame() {
+        const gameId = document.getElementById('gameId').value;
+
+        if (!gameId) {
+            log('Укажите Game ID', 'error');
+            return;
+        }
+
+        send('/app/game/start', gameId);
+    }
+
+    function getQuestions() {
+        const inputGameId = document.getElementById('gameId').value.trim();
+        if (!inputGameId) {
+            log('❌ Укажите Game ID', 'error');
+            return;
+        }
+        if (!stompClient || !stompClient.connected) {
+            log('❌ Нет WebSocket соединения', 'error');
+            return;
+        }
+
+        // 🔑 КРИТИЧЕСКИ ВАЖНО: синхронизируем ID перед подпиской
+        currentGameId = inputGameId;
+        log(`🔄 Game ID синхронизирован: ${currentGameId}`, 'info');
+
+        // Отписываемся от старой подписки (если есть), чтобы не дублировать
+        if (questionsSubscription) {
+            questionsSubscription.unsubscribe();
+            log('🔄 Старая подписка на вопросы удалена', 'info');
+        }
+
+        // Создаём новую подписку
+        const destination = `/topic/game/${currentGameId}/questions`;
+        questionsSubscription = stompClient.subscribe(destination, handleQuestions);
+        log(`📡 Подписка создана: ${destination}`, 'info');
+
+        // Отправляем запрос
+        send('/app/game/questions', currentGameId);
+    }
+
+    function handleQuestions(message) {
+        console.log('📩 STOMP RAW MESSAGE:', message);
+        console.log('📦 Headers:', message.headers);
+        console.log('📦 Body type:', typeof message.body);
+
+        try {
+            const rawData = message.body;
+            if (!rawData || rawData.trim().length === 0) {
+                log('⚠️ Пришло пустое сообщение', 'warning');
+                return;
+            }
+
+            const questions = JSON.parse(rawData);
+            log(`✅ Получено вопросов: ${Array.isArray(questions) ? questions.length : 'не массив'}`, 'success');
+
+            if (Array.isArray(questions) && questions.length > 0) {
+                const first = questions[0];
+                // Универсально достаём ID (под разные DTO)
+                document.getElementById('questionId').value = first.id || first.questionId || '';
+
+                if (first.answers && Array.isArray(first.answers) && first.answers.length > 0) {
+                    document.getElementById('answerId').value = first.answers[0].id || first.answers[0].answerId || '';
+                    log('📝 Первый вопрос и ответ автозаполнены', 'info');
+                }
+            }
+        } catch (e) {
+            console.error('❌ JSON Parse Error:', e);
+            log(`💥 Ошибка парсинга: ${e.message}`, 'error');
+            // Выводим первые 100 символов, чтобы понять, что пришло
+            log(`📄 Raw data: ${message.body.substring(0, 150)}...`, 'info');
+        }
+    }
+
+    function submitAnswer() {
+        const gameId = document.getElementById('gameId').value;
+        const questionId = document.getElementById('questionId').value;
+        const answerId = document.getElementById('answerId').value;
+        const teamId = document.getElementById('teamId').value;
+
+        if (!gameId || !questionId || !answerId || !teamId) {
+            log('Заполните все поля для ответа', 'error');
+            return;
+        }
+
+        send('/app/game/answer', {
+            gameId: gameId,
+            questionId: questionId,
+            answerId: answerId,
+            teamId: teamId
+        });
+    }
+
+    function finishGame() {
+        const gameId = document.getElementById('gameId').value;
+
+        if (!gameId) {
+            log('Укажите Game ID', 'error');
+            return;
+        }
+
+        send('/app/game/finish', gameId);
+    }
+</script>
+</body>
+</html>
